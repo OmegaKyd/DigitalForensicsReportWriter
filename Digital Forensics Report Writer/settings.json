@@ -1,0 +1,16 @@
+{
+  "examiner_agency_type": "",
+  "examiner_agency_custom": "",
+  "examiner_title": "",
+  "examiner_name": "",
+  "dfr_number_prefix": "DFR2026-",
+  "warrant_report_prefix": "WDR2026-",
+  "default_service_provider": "",
+  "last_template_dir": "",
+  "last_extraction_dir": "",
+  "last_export_dir": "",
+  "dfr_templates_dir": "C:\\Users\\ghost\\Desktop\\Digital Forensics Report Writer\\Templates",
+  "remembered_request_titles": [],
+  "remembered_request_agencies": [],
+  "version": "1.0.1"
+}
