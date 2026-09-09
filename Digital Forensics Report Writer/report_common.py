@@ -452,6 +452,67 @@ def parse_digital_collector_date(date_str):
         return raw
 
 
+def format_capacity_gb(amount, unit):
+    try:
+        size = float(str(amount).replace(",", ""))
+    except ValueError:
+        return ""
+    unit = (unit or "GB").strip().upper()
+    if unit.startswith("BYTE"):
+        size = size / (1024 ** 3)
+        unit = "GB"
+    elif unit.startswith("TB"):
+        size = size * 1024
+        unit = "GB"
+    elif unit.startswith("MB"):
+        size = size / 1024
+        unit = "GB"
+    elif unit.startswith("KB"):
+        size = size / (1024 ** 2)
+        unit = "GB"
+    if size >= 10:
+        text = f"{size:.0f} GB"
+    else:
+        text = f"{size:.1f} GB"
+    return text.replace(".0 GB", " GB") if text.endswith(".0 GB") else text
+
+
+def parse_log_capacity(content):
+    """Pull a human GB capacity from FTK, TX1, X-Ways, or Digital Collector logs."""
+    text = content or ""
+    patterns = (
+        r"Source data size\s*:\s*([\d,]+(?:\.\d+)?)\s*(KB|MB|GB|TB)\b",
+        r"Capacity\s*:\s*([\d,]+(?:\.\d+)?)\s*(KB|MB|GB|TB|bytes?)\b",
+        r"Size\s*:\s*([\d,]+(?:\.\d+)?)\s*(KB|MB|GB|TB)\b",
+        r"Drive Capacity\s*:\s*([\d,]+(?:\.\d+)?)\s*(KB|MB|GB|TB)\b",
+        r"Capacity\s*:\s*([\d,]+)\s*bytes\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.I)
+        if not match:
+            continue
+        if match.lastindex == 1:
+            formatted = format_capacity_gb(match.group(1), "bytes")
+        else:
+            formatted = format_capacity_gb(match.group(1), match.group(2))
+        if formatted:
+            return formatted
+    return ""
+
+
+def apply_parsed_capacity(extraction_data, content, populated=None):
+    data = extraction_data if isinstance(extraction_data, dict) else {}
+    if (data.get("device_capacity") or data.get("Device_Capacity") or "").strip():
+        return data
+    capacity = parse_log_capacity(content)
+    if capacity:
+        data["device_capacity"] = capacity
+        data["Device_Capacity"] = capacity
+        if populated is not None:
+            populated.add("device_capacity")
+    return data
+
+
 def parse_digital_collector_log(content):
     """Parse a Cellebrite Digital Collector acquisition log.
 
@@ -616,21 +677,58 @@ def _remember_templates_dir(path):
     manager.save_settings(settings)
 
 
-def seed_templates(dest):
-    """Copy missing official .docx files into the user DFR Templates folder."""
+def restore_official_templates(dest, overwrite=False):
+    """Copy official bundled .docx files into the user DFR Templates folder.
+
+    Missing files are always restored. Existing files are left alone unless
+    overwrite is True. Never writes into the official bundled Templates folder.
+    """
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
+    copied = []
     bundled = bundled_templates_dir()
     try:
-        if bundled.is_dir() and bundled.resolve() != dest.resolve():
-            for src in bundled.glob("*.docx"):
-                if src.name.startswith("~$"):
-                    continue
-                target = dest / src.name
-                if not target.exists():
-                    shutil.copy2(src, target)
+        if not bundled.is_dir() or bundled.resolve() == dest.resolve():
+            return copied
+        for src in bundled.glob("*.docx"):
+            if src.name.startswith("~$"):
+                continue
+            target = dest / src.name
+            if overwrite or not target.exists():
+                shutil.copy2(src, target)
+                copied.append(src.name)
     except Exception:
         pass
+    return copied
+
+
+def seed_templates(dest):
+    """First-time copy of official templates into a new user folder."""
+    restore_official_templates(dest, overwrite=False)
+    return Path(dest)
+
+
+def _folder_has_docx(folder):
+    try:
+        return any(
+            path.suffix.lower() == ".docx" and not path.name.startswith("~$")
+            for path in Path(folder).glob("*.docx")
+        )
+    except Exception:
+        return False
+
+
+def resolve_templates_dir():
+    """User DFR Templates folder without copying official files back in."""
+    dest = _saved_templates_dir()
+    if dest is not None and _is_official_templates(dest):
+        dest = None
+    if dest is None:
+        dest = _folder_beside_exe(TEMPLATES_FOLDER_NAME)
+    if dest is None or _is_official_templates(dest):
+        dest = writable_dir() / TEMPLATES_FOLDER_NAME
+    dest = Path(dest)
+    dest.mkdir(parents=True, exist_ok=True)
     return dest
 
 
@@ -639,18 +737,19 @@ def _folder_beside_exe(name):
     return candidate if candidate.is_dir() else None
 
 
+def _is_official_templates(path):
+    """True when path is the packaged/project Templates folder (do not write there)."""
+    if not path:
+        return False
+    try:
+        return Path(path).resolve() == bundled_templates_dir().resolve()
+    except Exception:
+        return False
+
+
 def templates_dir():
-    """Writable DFR Templates folder chosen by the user; seeded from the bundle."""
-    dest = _saved_templates_dir()
-    if dest is None:
-        dest = _folder_beside_exe(TEMPLATES_FOLDER_NAME)
-    if dest is None and not getattr(sys, "frozen", False):
-        bundled = bundled_templates_dir()
-        if bundled.is_dir():
-            dest = bundled
-    if dest is None:
-        dest = writable_dir() / TEMPLATES_FOLDER_NAME
-    return seed_templates(dest)
+    """Writable DFR Templates folder chosen by the user. Does not restore deleted files."""
+    return resolve_templates_dir()
 
 
 def _pick_templates_parent(parent, initial=None):
@@ -733,29 +832,38 @@ def _ask_about_found_templates(parent, found):
 def ensure_user_templates(parent=None):
     """First run: ask where to create DFR Templates, then remember that path."""
     saved = _saved_templates_dir()
+    if saved is not None and _is_official_templates(saved):
+        saved = None
     if saved is not None:
-        return seed_templates(saved)
+        return saved
 
     existing_dfr = _folder_beside_exe(TEMPLATES_FOLDER_NAME)
-    if existing_dfr is not None:
+    if existing_dfr is not None and not _is_official_templates(existing_dfr):
         _remember_templates_dir(existing_dfr)
-        return seed_templates(existing_dfr)
+        return existing_dfr
 
     found_templates = _folder_beside_exe("Templates")
     if found_templates is not None and getattr(sys, "frozen", False):
         dest = _ask_about_found_templates(parent, found_templates)
-        seed_templates(dest)
+        if _is_official_templates(dest):
+            dest = writable_dir() / TEMPLATES_FOLDER_NAME
+        dest = Path(dest)
+        dest.mkdir(parents=True, exist_ok=True)
+        if not _folder_has_docx(dest):
+            seed_templates(dest)
         _remember_templates_dir(dest)
         return dest
 
-    if not getattr(sys, "frozen", False):
-        bundled = bundled_templates_dir()
-        if bundled.is_dir():
-            _remember_templates_dir(bundled)
-            return bundled
-
-    dest = _pick_templates_parent(parent)
-    seed_templates(dest)
+    if getattr(sys, "frozen", False):
+        dest = _pick_templates_parent(parent)
+    else:
+        dest = writable_dir() / TEMPLATES_FOLDER_NAME
+    if _is_official_templates(dest):
+        dest = writable_dir().parent / TEMPLATES_FOLDER_NAME
+    dest = Path(dest)
+    dest.mkdir(parents=True, exist_ok=True)
+    if not _folder_has_docx(dest):
+        seed_templates(dest)
     _remember_templates_dir(dest)
     return dest
 
@@ -773,6 +881,10 @@ def change_templates_location(parent=None):
     if not chosen:
         return None
     new = _as_templates_folder(chosen)
+    if _is_official_templates(new):
+        new = Path(chosen).resolve().parent / TEMPLATES_FOLDER_NAME
+        if _is_official_templates(new):
+            new = writable_dir() / TEMPLATES_FOLDER_NAME
     try:
         if new.resolve() == old.resolve():
             messagebox.showinfo(
@@ -818,7 +930,10 @@ def change_templates_location(parent=None):
                 pass
         else:
             shutil.move(str(old), str(new))
-        seed_templates(new)
+        new = Path(new)
+        new.mkdir(parents=True, exist_ok=True)
+        if moving_official and not _folder_has_docx(new):
+            seed_templates(new)
         _remember_templates_dir(new)
         messagebox.showinfo(
             "DFR Templates",
@@ -1106,6 +1221,27 @@ def sanitize_filename(name):
     return cleaned or "DFR_Report"
 
 
+def suggested_warrant_filename(dfr_number, provider="", account_id=""):
+    """Default warrant name: '(DFR #) - (Provider) (AccountID) Return.docx'."""
+    def part(value):
+        cleaned = re.sub(r'[<>:"/\\|?*]', "", value or "").strip()
+        return re.sub(r"\s+", " ", cleaned)
+
+    dfr = part(dfr_number)
+    provider = part(provider)
+    account_id = part(account_id)
+    detail = " ".join(piece for piece in (provider, f"({account_id})" if account_id else "") if piece).strip()
+    if dfr and detail:
+        base = f"{dfr} - {detail} Return"
+    elif dfr:
+        base = f"{dfr} - Return"
+    elif detail:
+        base = f"{detail} Return"
+    else:
+        base = "DFR_Warrant_Return"
+    return f"{base}.docx"
+
+
 def suggested_report_filename(dfr_number, module_label, owner="", model=""):
     """Default name: '(DFR #) - (Owner Name) (Device Model).docx'."""
     dfr = sanitize_filename(dfr_number or "")
@@ -1229,8 +1365,165 @@ def require_device_identity(extraction_data, manufacturer_keys=None, model_keys=
     return ["Device manufacturer or model (not found in the extraction file)"]
 
 
+PREVIEW_TOKEN_DATA_KEYS = {
+    "PY_DFR": ("DFR_Num", "dfr_num"),
+    "PY_CASENUMBER": ("Case_Number",),
+    "PY_EVIDENCE": ("evidence_ID",),
+    "PY_REQDATE": ("Request_Date",),
+    "PY_OWNER": ("Device_Owner",),
+    "PY_REQAGENCY": ("Request_Agency",),
+    "PY_REQOFF": ("PY_REQOFF",),
+    "PY_EXAMINER": ("PY_EXAMINER",),
+    "PY_IMAGEDATE": ("formatted_date",),
+    "PY_MAN": ("device_manufacturer",),
+    "PY_MOD": ("device_model",),
+    "PY_COLOR": ("device_color", "Device_Color"),
+    "PY_PHONE": ("Phone_Number",),
+    "PY_SERIAL": ("Serial_Number",),
+    "PY_IMEI": ("DEV_IMEI",),
+    "PY_CAPACITY": ("device_capacity", "Device_Capacity"),
+    "PY_DEVNAME": ("Device_Name",),
+    "PY_ACCOUNT": ("Device_Account",),
+    "PY_ICCID": ("device_iccid",),
+    "PY_PASSCODE": ("device_passcode", "device_password"),
+    "PY_CARRIER": ("device_carrier",),
+    "PY_OS": ("Device_OS",),
+    "PY_CBVER": ("cellebrite_version",),
+    "PY_GKVER": ("GrayKey_OS",),
+    "PY_DEVMAKE": ("device_PCMan",),
+    "PY_DEVMODEL": ("device_PCMod",),
+    "PY_PCMAN": ("device_PCMan",),
+    "PY_PCMOD": ("device_PCMod",),
+    "PY_PCSERIAL": ("device_PCSerial",),
+    "PY_HDMAKE": ("hd_make",),
+    "PY_HDMODEL": ("hd_model",),
+    "PY_HDSERIAL": ("hd_serial",),
+    "PY_FTKVER": ("FTK_OS",),
+    "PY_TX1VER": ("TX1_OS",),
+    "PY_XWVER": ("xways_OS",),
+    "PY_DCVER": ("DC_OS",),
+}
+
+PREVIEW_TOKEN_WIDGETS = {
+    "PY_DFR": ("DFR_Num", "dfr_num", "dfr_number"),
+    "PY_CASENUMBER": ("case_number",),
+    "PY_EVIDENCE": ("evidence_number",),
+    "PY_OWNER": ("device_owner",),
+    "PY_REQAGENCY": ("request_agency", "requesting_agency"),
+    "PY_COLOR": ("device_color",),
+    "PY_CAPACITY": ("device_capacity",),
+    "PY_ICCID": ("device_iccid",),
+    "PY_PASSCODE": ("device_passcode", "device_password"),
+    "PY_CARRIER": ("device_carrier",),
+    "PY_MOD": ("device_model",),
+    "PY_DEVMODEL": ("device_PCMod",),
+    "PY_PCMOD": ("device_PCMod",),
+    "PY_DEVMAKE": ("device_PCMan",),
+    "PY_PCMAN": ("device_PCMan",),
+    "PY_PCSERIAL": ("device_PCSerial",),
+    "PY_HDMODEL": ("hd_model",),
+    "PY_HDSERIAL": ("hd_serial",),
+    "PY_HDMAKE": ("hd_make",),
+}
+
+_PREVIEW_IDENTITY_KEYS = ("PY_IMEI", "PY_SERIAL", "PY_PCSERIAL", "PY_HDSERIAL", "PY_MOD", "PY_DEVMODEL")
+
+
+def _preview_text(value):
+    if value is None:
+        return ""
+    return str(value).replace("\n", " ").strip()
+
+
+def preview_overrides(app):
+    stored = getattr(app, "_preview_overrides", None)
+    if not isinstance(stored, dict):
+        stored = {}
+        app._preview_overrides = stored
+    return stored
+
+
+def extracted_preview_values(app):
+    stored = getattr(app, "_preview_extracted", None)
+    if not isinstance(stored, dict):
+        stored = {}
+        app._preview_extracted = stored
+    return stored
+
+
+def set_extracted_preview(app, extraction_data, kind="mobile"):
+    source = dict(extraction_data or {})
+    if kind == "pc":
+        rows = pc_preview_rows(source)
+    else:
+        rows = mobile_preview_rows(source)
+    extracted = {key: _preview_text(value) for key, value in rows}
+    previous = extracted_preview_values(app)
+    changed = any(
+        (previous.get(key) or "") != (extracted.get(key) or "")
+        for key in _PREVIEW_IDENTITY_KEYS
+        if previous.get(key) or extracted.get(key)
+    )
+    if changed:
+        app._preview_overrides = {}
+    app._preview_extracted = extracted
+    return extracted
+
+
+def apply_overrides_to_preview_rows(app, rows):
+    overrides = preview_overrides(app)
+    updated = []
+    for key, value in rows:
+        if key in overrides:
+            updated.append((key, overrides[key]))
+        else:
+            updated.append((key, value))
+    return updated
+
+
+def apply_preview_overrides_to_data(app, data):
+    merged = dict(data or {})
+    for token, value in preview_overrides(app).items():
+        text = _preview_text(value)
+        for key in PREVIEW_TOKEN_DATA_KEYS.get(token, ()):
+            merged[key] = text
+        merged[token] = text
+    return merged
+
+
+def _set_widget_value(widget, value):
+    if widget is None:
+        return False
+    try:
+        widget.delete(0, "end")
+        if value:
+            widget.insert(0, value)
+        return True
+    except Exception:
+        pass
+    try:
+        widget.set(value)
+        return True
+    except Exception:
+        return False
+
+
+def apply_preview_overrides_to_form(app):
+    for token, value in preview_overrides(app).items():
+        text = _preview_text(value)
+        for attr in PREVIEW_TOKEN_WIDGETS.get(token, ()):
+            _set_widget_value(getattr(app, attr, None), text)
+
+
+def overlay_preview_overrides(app, replacement_map):
+    mapping = replacement_map if isinstance(replacement_map, dict) else {}
+    for token, value in preview_overrides(app).items():
+        mapping[token] = _preview_text(value)
+    return mapping
+
+
 def show_placeholder_preview(parent, rows, output_name="", allow_write=False):
-    """Show PY_ values. allow_write is unused; preview is informational only."""
+    """Editable PY_ preview. Apply stores corrections for report generation."""
     from tkinter import Toplevel
     from tkinter import ttk
     import tkinter as tk
@@ -1240,13 +1533,15 @@ def show_placeholder_preview(parent, rows, output_name="", allow_write=False):
     dialog.title("Placeholder preview")
     dialog.transient(parent)
     dialog.grab_set()
-    dialog.geometry("720x520")
+    dialog.geometry("780x560")
     dialog.configure(bg=COLORS.get("bg", "#0b1e30"))
 
     ttk.Label(
         dialog,
-        text="These PY_ values will be written into the template when you generate the report. Empty fields stay blank.",
-        wraplength=680,
+        text="Edit a value if the extraction was wrong, then click Apply to Report. "
+        "Applied values are used when you generate the report. "
+        "Revert to Extracted restores the values from the loaded file.",
+        wraplength=750,
     ).pack(anchor="w", padx=14, pady=(12, 4))
     if output_name:
         ttk.Label(dialog, text=f"Suggested file name: {output_name}", style="Hint.TLabel").pack(
@@ -1255,35 +1550,64 @@ def show_placeholder_preview(parent, rows, output_name="", allow_write=False):
 
     frame = ttk.Frame(dialog)
     frame.pack(fill="both", expand=True, padx=14, pady=6)
-    text = tk.Text(frame, wrap="none", bg=COLORS.get("entry_bg", "#0a1724"),
-                   fg=COLORS.get("entry_fg", "#e7f3fb"), insertbackground=COLORS.get("accent", "#2ec8e0"))
-    yscroll = ttk.Scrollbar(frame, orient="vertical", command=text.yview)
-    text.configure(yscrollcommand=yscroll.set)
-    text.pack(side="left", fill="both", expand=True)
+    canvas = tk.Canvas(frame, highlightthickness=0, bg=COLORS.get("panel", "#12283d"))
+    yscroll = ttk.Scrollbar(frame, orient="vertical", command=canvas.yview)
+    canvas.configure(yscrollcommand=yscroll.set)
+    canvas.pack(side="left", fill="both", expand=True)
     yscroll.pack(side="right", fill="y")
+    table = ttk.Frame(canvas)
+    canvas_window = canvas.create_window((0, 0), window=table, anchor="nw")
 
-    text.insert("end", f"{'Placeholder':<18}  Value\n")
-    text.insert("end", f"{'-'*18}  {'-'*48}\n")
-    for key, value in rows:
-        display = "" if value is None else str(value).replace("\n", " ").strip()
-        if not display:
-            display = "(empty)"
-        if len(display) > 90:
-            display = display[:87] + "..."
-        text.insert("end", f"{key:<18}  {display}\n")
-    text.configure(state="disabled")
+    def on_table_configure(_event=None):
+        canvas.configure(scrollregion=canvas.bbox("all"))
 
-    def accept():
+    def on_canvas_configure(event):
+        canvas.itemconfigure(canvas_window, width=event.width)
+
+    table.bind("<Configure>", on_table_configure)
+    canvas.bind("<Configure>", on_canvas_configure)
+
+    ttk.Label(table, text="Placeholder").grid(row=0, column=0, sticky="w", padx=(0, 10), pady=(0, 4))
+    ttk.Label(table, text="Value").grid(row=0, column=1, sticky="w", pady=(0, 4))
+    table.columnconfigure(1, weight=1)
+
+    editors = {}
+    extracted = extracted_preview_values(parent)
+    for index, (key, value) in enumerate(rows, start=1):
+        ttk.Label(table, text=key).grid(row=index, column=0, sticky="nw", padx=(0, 10), pady=2)
+        entry = ttk.Entry(table)
+        entry.grid(row=index, column=1, sticky="ew", pady=2)
+        entry.insert(0, _preview_text(value))
+        editors[key] = entry
+
+    status = ttk.Label(dialog, text="", style="Hint.TLabel")
+    status.pack(anchor="w", padx=14)
+
+    def current_values():
+        return {key: entry.get().strip() for key, entry in editors.items()}
+
+    def apply_edits():
+        parent._preview_overrides = current_values()
+        apply_preview_overrides_to_form(parent)
         result["ok"] = True
-        dialog.destroy()
+        status.configure(text="Saved. Generate Report will use these values.")
 
-    def cancel():
-        result["ok"] = False
+    def revert_extracted():
+        for key, entry in editors.items():
+            original = extracted.get(key, "")
+            entry.delete(0, "end")
+            if original:
+                entry.insert(0, original)
+        status.configure(text="Showing originally extracted values. Click Apply to Report to keep them.")
+
+    def close():
         dialog.destroy()
 
     buttons = ttk.Frame(dialog)
     buttons.pack(fill="x", padx=14, pady=10)
-    ttk.Button(buttons, text="Close", style="Accent.TButton", command=cancel).pack(side="right")
+    ttk.Button(buttons, text="Apply to Report", style="Accent.TButton", command=apply_edits).pack(side="right")
+    ttk.Button(buttons, text="Close", command=close).pack(side="right", padx=(0, 8))
+    ttk.Button(buttons, text="Revert to Extracted", command=revert_extracted).pack(side="left")
 
     parent.wait_window(dialog)
     return result["ok"]
@@ -1345,14 +1669,59 @@ def pc_preview_rows(data, officer_text="", image_date=""):
     ]
 
 
-def apply_suggested_filename(app, module_label, model=""):
+def _filename_stem(name):
+    text = (name or "").strip()
+    if text.lower().endswith(".docx"):
+        text = text[:-5]
+    return text.casefold()
+
+
+def _write_suggested_filename(app, suggested):
     widget = getattr(app, "output_filename", None)
     if widget is None:
-        return ""
+        return suggested
     try:
         current = widget.get().strip()
     except Exception:
         current = ""
+    last = getattr(app, "_suggested_filename", "") or ""
+    user_customized = bool(
+        current
+        and last
+        and _filename_stem(current) != _filename_stem(last)
+    )
+    if not user_customized:
+        try:
+            widget.delete(0, "end")
+            widget.insert(0, suggested)
+            app._suggested_filename = suggested
+        except Exception:
+            pass
+    return suggested
+
+
+def apply_warrant_suggested_filename(app):
+    """Fill warrant Output File Name when it is empty or still the last suggestion."""
+    dfr = ""
+    provider = ""
+    account_id = ""
+    try:
+        dfr = app.dfr_number.get().strip()
+    except Exception:
+        pass
+    try:
+        provider = app.service_provider.get().strip()
+    except Exception:
+        pass
+    try:
+        account_id = app.account_identifier.get().strip()
+    except Exception:
+        pass
+    return _write_suggested_filename(app, suggested_warrant_filename(dfr, provider, account_id))
+
+
+def apply_suggested_filename(app, module_label, model=""):
+    """Fill Output File Name when it is empty or still the last suggestion."""
     dfr = ""
     owner = ""
     try:
@@ -1360,13 +1729,16 @@ def apply_suggested_filename(app, module_label, model=""):
             dfr = app.DFR_Num.get().strip()
         elif hasattr(app, "dfr_num"):
             dfr = app.dfr_num.get().strip()
+        elif hasattr(app, "dfr_number"):
+            dfr = app.dfr_number.get().strip()
     except Exception:
         pass
     try:
         owner = app.device_owner.get().strip()
     except Exception:
         pass
-    return suggested_report_filename(dfr, module_label, owner, model)
+    suggested = suggested_report_filename(dfr, module_label, owner, model)
+    return _write_suggested_filename(app, suggested)
 
 
 def seed_save_location(app):

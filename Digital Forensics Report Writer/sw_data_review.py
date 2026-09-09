@@ -7,7 +7,7 @@ import os
 import re
 from tkinterdnd2 import DND_FILES, TkinterDnD
 from settings_manager import SettingsManager
-from ui_theme import apply_theme, add_header_bar, add_action_bar, pack_right_actions, size_window, parse_mdy_date, add_date_entry, COLORS, close_and_return
+from ui_theme import apply_theme, add_header_bar, add_action_bar, pack_right_actions, size_window, parse_mdy_date, add_date_entry, COLORS, close_and_return, DndToplevel
 from app_menu import attach_app_menu
 from paragraphs_manager import fill_paragraph, load_paragraphs
 from report_common import (
@@ -24,6 +24,7 @@ from report_common import (
     saved_examiner_agency,
     bind_prefix_typeahead,
     refresh_request_title_values,
+    apply_warrant_suggested_filename,
 )
 from docx.oxml.ns import qn
 from docx.oxml import parse_xml
@@ -31,9 +32,16 @@ from lxml import etree
 
 #ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
 
-class WarrantDataReturns(TkinterDnD.Tk):
+class WarrantDataReturns(DndToplevel):
     def __init__(self, master=None):
-        super().__init__()
+        if master is None:
+            master = TkinterDnD.Tk()
+            master.withdraw()
+            owns_root = True
+        else:
+            owns_root = False
+        super().__init__(master)
+        self._owns_hidden_root = owns_root
         
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.master = master
@@ -92,9 +100,32 @@ class WarrantDataReturns(TkinterDnD.Tk):
 
 # LEFT PANE
     def create_left_column_widgets(self):
+        self.create_role_selection_frame()
         self.create_request_information_frame()
         self.create_warrant_return_dates_frame()
         self.create_examiner_information_frame()
+
+    def create_role_selection_frame(self):
+        role_frame = ttk.LabelFrame(self.scrollable_frame, text="Examination Type", padding=(4, 2))
+        role_frame.pack(fill=tk.X, padx=2, pady=2)
+        ttk.Label(role_frame, text="Select Role:").grid(row=0, column=0, sticky="w", pady=2)
+        self.role_type = ttk.Combobox(
+            role_frame,
+            values=["Agency Assist", "Case Agent"],
+            state="readonly",
+        )
+        self.role_type.grid(row=0, column=1, sticky="ew", pady=2)
+        self.role_type.set("Agency Assist")
+        self.role_type.bind("<<ComboboxSelected>>", self.toggle_request_content)
+        role_frame.columnconfigure(1, weight=1)
+
+    def toggle_request_content(self, event=None):
+        if not hasattr(self, "agency_assist_fields"):
+            return
+        if self.role_type.get() == "Case Agent":
+            self.agency_assist_fields.grid_remove()
+        else:
+            self.agency_assist_fields.grid()
 
     def create_warrant_return_dates_frame(self):
         warrant_frame = ttk.LabelFrame(self.scrollable_frame, text="Warrant Return Information", padding=6)
@@ -138,29 +169,36 @@ class WarrantDataReturns(TkinterDnD.Tk):
         request_frame = ttk.LabelFrame(self.scrollable_frame, text="Request Information", padding=(4, 2))
         request_frame.pack(fill=tk.X, padx=2, pady=2)
 
-        ttk.Label(request_frame, text="Requesting Agency:").grid(row=0, column=0, sticky="w", pady=2)
-        self.requesting_agency = ttk.Combobox(request_frame)
-        self.requesting_agency.grid(row=0, column=1, sticky="ew", pady=2)
+        self.agency_assist_fields = ttk.Frame(request_frame)
+        self.agency_assist_fields.grid(row=0, column=0, columnspan=2, sticky="ew")
+
+        ttk.Label(self.agency_assist_fields, text="Request Date:").grid(row=0, column=0, sticky="w", pady=2)
+        self.request_date = add_date_entry(self.agency_assist_fields, row=0, column=1)
+
+        ttk.Label(self.agency_assist_fields, text="Requesting Agency:").grid(row=1, column=0, sticky="w", pady=2)
+        self.requesting_agency = ttk.Combobox(self.agency_assist_fields)
+        self.requesting_agency.grid(row=1, column=1, sticky="ew", pady=2)
         setup_agency_combobox(self.requesting_agency)
 
-        ttk.Label(request_frame, text="Requesting Officer Title:").grid(row=1, column=0, sticky="w", pady=2)
-        self.requesting_officer_title = ttk.Combobox(request_frame, values=load_request_titles())
-        self.requesting_officer_title.grid(row=1, column=1, sticky="ew", pady=2)
+        ttk.Label(self.agency_assist_fields, text="Requesting Officer Title:").grid(row=2, column=0, sticky="w", pady=2)
+        self.requesting_officer_title = ttk.Combobox(self.agency_assist_fields, values=load_request_titles())
+        self.requesting_officer_title.grid(row=2, column=1, sticky="ew", pady=2)
         self.requesting_officer_title.set("")
         bind_prefix_typeahead(self.requesting_officer_title)
 
-        self.requesting_officer_title_other = ttk.Entry(request_frame)
-        self.requesting_officer_title_other.grid(row=2, column=1, sticky="ew", pady=2)
+        self.requesting_officer_title_other = ttk.Entry(self.agency_assist_fields)
+        self.requesting_officer_title_other.grid(row=3, column=1, sticky="ew", pady=2)
         self.requesting_officer_title_other.grid_remove()
 
-        ttk.Label(request_frame, text="Requesting Officer:").grid(row=3, column=0, sticky="w", pady=2)
-        self.requesting_officer = ttk.Entry(request_frame)
-        self.requesting_officer.grid(row=3, column=1, sticky="ew", pady=2)
+        ttk.Label(self.agency_assist_fields, text="Requesting Officer:").grid(row=4, column=0, sticky="w", pady=2)
+        self.requesting_officer = ttk.Entry(self.agency_assist_fields)
+        self.requesting_officer.grid(row=4, column=1, sticky="ew", pady=2)
+        self.agency_assist_fields.columnconfigure(1, weight=1)
 
-        ttk.Label(request_frame, text="Primary Case Offense:").grid(row=4, column=0, sticky="w", pady=2)
-        self.offense_var = tk.StringVar()  # ← new variable for tracing
+        ttk.Label(request_frame, text="Primary Case Offense:").grid(row=1, column=0, sticky="w", pady=2)
+        self.offense_var = tk.StringVar()
         self.primary_case_offense = ttk.Entry(request_frame, textvariable=self.offense_var)
-        self.primary_case_offense.grid(row=4, column=1, sticky="ew", pady=2)
+        self.primary_case_offense.grid(row=1, column=1, sticky="ew", pady=2)
         self.offense_var.trace_add("write", lambda *args: self.format_offense_lowercase())
 
         request_frame.columnconfigure(1, weight=1)
@@ -277,6 +315,10 @@ class WarrantDataReturns(TkinterDnD.Tk):
         self.account_data_size = ttk.Entry(account_frame)
         self.account_data_size.grid(row=2, column=1, sticky="ew", pady=2)
 
+        ttk.Label(account_frame, text="Account Owner:").grid(row=3, column=0, sticky="w", pady=2)
+        self.account_owner = ttk.Entry(account_frame)
+        self.account_owner.grid(row=3, column=1, sticky="ew", pady=2)
+
         account_frame.columnconfigure(1, weight=1)
 
     def create_forensic_software_frame(self):
@@ -288,25 +330,24 @@ class WarrantDataReturns(TkinterDnD.Tk):
         self.cb_griffeye_var   = tk.IntVar(forensic_frame)
         self.cb_manual_var     = tk.IntVar(forensic_frame)
 
-        # Place all checkboxes in one row
         ttk.Checkbutton(
             forensic_frame, text="Cellebrite", variable=self.cb_cellebrite_var,
-            onvalue=1, offvalue=0
+            onvalue=1, offvalue=0, command=self.on_processing_software_toggled
         ).grid(row=0, column=0, sticky="w", padx=(0, 0), pady=4)
 
         ttk.Checkbutton(
             forensic_frame, text="AXIOM", variable=self.cb_axiom_var,
-            onvalue=1, offvalue=0
+            onvalue=1, offvalue=0, command=self.on_processing_software_toggled
         ).grid(row=0, column=1, sticky="w", padx=(0, 0), pady=4)
 
         ttk.Checkbutton(
             forensic_frame, text="Griffeye", variable=self.cb_griffeye_var,
-            onvalue=1, offvalue=0
+            onvalue=1, offvalue=0, command=self.on_processing_software_toggled
         ).grid(row=0, column=2, sticky="w", padx=(0, 0), pady=4)
 
         ttk.Checkbutton(
-            forensic_frame, text="Manual Exam", variable=self.cb_manual_var,
-            onvalue=1, offvalue=0
+            forensic_frame, text="Manual Exam Only", variable=self.cb_manual_var,
+            onvalue=1, offvalue=0, command=self.on_manual_exam_toggled
         ).grid(row=0, column=3, sticky="w", padx=(0, 0), pady=4)
 
         for col in range(4):
@@ -321,8 +362,102 @@ class WarrantDataReturns(TkinterDnD.Tk):
         if hasattr(self, 'cb_griffeye_var') and self.cb_griffeye_var.get() == 1:
             selected.append("Griffeye")
         if hasattr(self, 'cb_manual_var') and self.cb_manual_var.get() == 1:
-            selected.append("Manual Exam")
+            selected.append("Manual Exam Only")
         return selected
+
+    def on_manual_exam_toggled(self):
+        if self.cb_manual_var.get() != 1:
+            return
+        self.cb_cellebrite_var.set(0)
+        self.cb_axiom_var.set(0)
+        self.cb_griffeye_var.set(0)
+
+    def on_processing_software_toggled(self):
+        if (
+            self.cb_cellebrite_var.get() == 1
+            or self.cb_axiom_var.get() == 1
+            or self.cb_griffeye_var.get() == 1
+        ):
+            self.cb_manual_var.set(0)
+
+    def get_processing_software(self):
+        """Cellebrite / AXIOM / Griffeye only. Manual Exam Only is not processing software."""
+        return [name for name in self.get_selected_forensic_software() if name != "Manual Exam Only"]
+
+    def format_software_list(self, names):
+        items = [str(name).strip() for name in (names or []) if str(name).strip()]
+        if not items:
+            return ""
+        if len(items) == 1:
+            return items[0]
+        if len(items) == 2:
+            return f"{items[0]} and {items[1]}"
+        return ", ".join(items[:-1]) + ", and " + items[-1]
+
+    def report_article_for(self, software_name):
+        text = (software_name or "").strip()
+        if not text:
+            return "a"
+        return "an" if text[0].lower() in "aeiou" else "a"
+
+    def ask_digital_report_software(self, tools):
+        """Ask which checked tools produced a Digital Report. None means cancel."""
+        result = {"tools": None}
+        win = tk.Toplevel(self)
+        win.title("Digital Report Software")
+        win.configure(bg=COLORS["bg"])
+        win.transient(self)
+        win.resizable(False, False)
+
+        ttk.Label(
+            win,
+            text="More than one forensic tool is selected. Which of the selected software did you use to create a Digital Report?",
+            wraplength=420,
+        ).pack(anchor="w", padx=16, pady=(14, 8))
+        ttk.Label(
+            win,
+            text="Check all that apply.",
+            wraplength=420,
+        ).pack(anchor="w", padx=16, pady=(0, 8))
+
+        vars_by_name = {}
+        for name in tools:
+            var = tk.IntVar(win, value=0)
+            vars_by_name[name] = var
+            ttk.Checkbutton(win, text=name, variable=var, onvalue=1, offvalue=0).pack(anchor="w", padx=24, pady=2)
+
+        def accept():
+            chosen = [name for name, var in vars_by_name.items() if var.get() == 1]
+            if not chosen:
+                messagebox.showinfo(
+                    "Digital Report Software",
+                    "Select at least one tool, or click Cancel.",
+                    parent=win,
+                )
+                return
+            result["tools"] = chosen
+            win.destroy()
+
+        def cancel():
+            result["tools"] = None
+            win.destroy()
+
+        buttons = ttk.Frame(win)
+        buttons.pack(fill="x", padx=16, pady=14)
+        ttk.Button(buttons, text="Use these tools", style="Accent.TButton", command=accept).pack(side="right")
+        ttk.Button(buttons, text="Cancel", command=cancel).pack(side="right", padx=(0, 8))
+
+        win.protocol("WM_DELETE_WINDOW", cancel)
+        win.update_idletasks()
+        width = max(460, win.winfo_reqwidth())
+        height = win.winfo_reqheight()
+        px = self.winfo_rootx() + max(0, (self.winfo_width() - width) // 2)
+        py = self.winfo_rooty() + max(0, (self.winfo_height() - height) // 3)
+        win.geometry(f"{width}x{height}+{px}+{py}")
+        win.grab_set()
+        win.focus_set()
+        self.wait_window(win)
+        return result["tools"]
 
     def create_output_file_frame(self):
         output_frame = ttk.LabelFrame(self.right_frame, text="Output File", padding="10")
@@ -355,6 +490,9 @@ class WarrantDataReturns(TkinterDnD.Tk):
         ttk.Button(content, text="Browse", command=self.browse_save_location).grid(row=5, column=0, columnspan=1, pady=4, sticky="ew")
 
         content.columnconfigure(1, weight=1)
+        for widget in (self.dfr_number, self.service_provider, self.account_identifier):
+            widget.bind("<KeyRelease>", lambda event: apply_warrant_suggested_filename(self), add="+")
+        apply_warrant_suggested_filename(self)
 
     def create_template_file_frame(self):
         template_frame = ttk.LabelFrame(self.right_frame, text="Template File", padding=6)
@@ -484,8 +622,29 @@ class WarrantDataReturns(TkinterDnD.Tk):
             for run in p.runs:
                 run.font.name = 'Arial'
                 run.font.size = Pt(11)
-        add(self.paragraphs['intro_self'])
-        #add(self.paragraphs['conclusion'])
+
+        role = data.get("Role_Type") or (self.role_type.get() if hasattr(self, "role_type") else "Agency Assist")
+        if role == "Case Agent":
+            limited = bool(data.get("Time_Frame_Start") and data.get("Time_Frame_End"))
+            if limited:
+                add(self.paragraphs["one_ca_limited"])
+            else:
+                add(self.paragraphs["one_ca"])
+            add(self.paragraphs["two_ca"])
+        else:
+            add(self.paragraphs["one_aa"])
+            add(self.paragraphs["two_aa"])
+
+        processing = [name for name in (data.get("Processing_Software_List") or []) if name]
+        if processing:
+            add(self.paragraphs["three_ca"])
+            report_tools = data.get("Report_Software_List") or processing
+            if len(report_tools) > 1:
+                add(self.paragraphs["four_ca_multi"])
+            else:
+                add(self.paragraphs["four_ca"])
+        else:
+            add(self.paragraphs["three_b"])
 
 ###PARAGRAPHS###
 
@@ -514,18 +673,16 @@ class WarrantDataReturns(TkinterDnD.Tk):
         if not is_complete_dfr_number(self.dfr_number.get()):
             missing.append("DFR Number")
 
-        # Requesting Agency
-        if not self.requesting_agency.get().strip():
-            missing.append("Requesting Agency")
-
-        # Requesting Officer Title
-        req_title = self.requesting_officer_title.get().strip()
-        if not req_title:
-            missing.append("Requesting Officer Title")
-
-        # Requesting Officer
-        if not self.requesting_officer.get().strip():
-            missing.append("Requesting Officer")
+        role = self.role_type.get() if hasattr(self, "role_type") else "Agency Assist"
+        if role != "Case Agent":
+            if not self.request_date.get().strip():
+                missing.append("Request Date")
+            if not self.requesting_agency.get().strip():
+                missing.append("Requesting Agency")
+            if not self.requesting_officer_title.get().strip():
+                missing.append("Requesting Officer Title")
+            if not self.requesting_officer.get().strip():
+                missing.append("Requesting Officer")
 
         # Primary Case Offense
         if not self.primary_case_offense.get().strip():
@@ -539,9 +696,23 @@ class WarrantDataReturns(TkinterDnD.Tk):
         if not self.data_return_date.get().strip():
             missing.append("Data Return Date")
 
-        # Forensic Software
+        if hasattr(self, "time_frame_limited_var") and self.time_frame_limited_var.get() == 1:
+            if not self.time_frame_start_date.get().strip():
+                missing.append("Time Frame Start Date")
+            if not self.time_frame_end_date.get().strip():
+                missing.append("Time Frame End Date")
+
+        if not self.service_provider.get().strip():
+            missing.append("Service Provider")
+        if not self.account_identifier.get().strip():
+            missing.append("Account Identifier")
+        if not self.account_data_size.get().strip():
+            missing.append("GB of Data")
+        if not self.account_owner.get().strip():
+            missing.append("Account Owner")
+
         if not self.get_selected_forensic_software():
-            missing.append("At least one Forensic Processing Software")
+            missing.append("Forensic Processing Software or Manual Exam Only")
 
         # Template File - use the correct attribute name
         template_path = getattr(self, 'template_file', None)
@@ -556,49 +727,107 @@ class WarrantDataReturns(TkinterDnD.Tk):
             messagebox.showerror("Missing Fields", f"Please fill in the following:\n\n" + "\n".join(f"• {f}" for f in missing))
             return
 
-        # Load the template
         if not hasattr(self, 'template_file') or not self.template_file:
             messagebox.showerror("Error", "No template file selected.")
             return
 
-        doc = Document(self.template_file)
+        examiner_title = self.format_title(self.examiner_title.get())
+        examiner_name = self.examiner_name.get().strip().title()
+        examiner_value = f"{examiner_title} {examiner_name}".strip()
+        examiner_agency, examiner_agency_abbr = self.format_agency(
+            self.examiner_agency.get().strip(), return_abbreviation=True
+        )
+        role = self.role_type.get() if hasattr(self, "role_type") else "Agency Assist"
+        if role == "Case Agent":
+            request_title = examiner_title
+            request_officer = examiner_name
+            request_agency = examiner_agency
+            request_agency_abbr = examiner_agency_abbr
+            request_officer_full = examiner_value
+        else:
+            request_title = self.format_title(self.requesting_officer_title.get())
+            request_officer = self.requesting_officer.get().strip().title()
+            request_agency, request_agency_abbr = self.format_agency(
+                self.requesting_agency.get().strip(), return_abbreviation=True
+            )
+            request_officer_full = f"{request_title} {request_officer}".strip()
+
+        processing_tools = self.get_processing_software()
+        report_tools = list(processing_tools)
+        if len(processing_tools) > 1:
+            chosen = self.ask_digital_report_software(processing_tools)
+            if chosen is None:
+                return
+            report_tools = chosen
+
+        forensic_software_text = self.format_software_list(processing_tools)
+        report_software_text = self.format_software_list(report_tools)
+        report_article = self.report_article_for(report_tools[0] if report_tools else "")
 
         # Gather data using current widgets
         data = {
             'PY_DFR': self.dfr_number.get().strip().upper(),
             'PY_CASENUMBER': self.case_number.get().strip().upper(),
-            'PY_EXAMINER': f"{self.format_title(self.examiner_title.get())} {self.examiner_name.get().strip().title()}",
-            'PY_REQAGENCY': self.format_agency(self.requesting_agency.get().strip()),
-            'PY_REQOFF': f"{self.format_title(self.requesting_officer_title.get())} {self.requesting_officer.get().strip().title()}",
+            'PY_EXAMINER': examiner_value,
+            'PY_REQAGENCY': request_agency,
+            'PY_REQOFF': request_officer_full,
             'PY_SERVEDATE': self.parse_request_date(self.warrant_service_date.get().strip()),
             'PY_RETURNDATE': self.parse_request_date(self.data_return_date.get().strip()),
             'PY_PROVIDER': self.service_provider.get().strip(),
             'PY_ACCOUNTID': self.account_identifier.get().strip(),
             'PY_DATASIZE': self.account_data_size.get().strip(),
+            'PY_OWNER': self.account_owner.get().strip().title(),
+            'Account_Owner': self.account_owner.get().strip().title(),
+            'Account_Identifier': self.account_identifier.get().strip(),
+            'Service_Provider': self.service_provider.get().strip(),
+            'Data_Size': self.account_data_size.get().strip(),
+            'Warrant_Service_Date': self.parse_request_date(self.warrant_service_date.get().strip()),
+            'Data_Return_Date': self.parse_request_date(self.data_return_date.get().strip()),
+            'DFR_Num': self.dfr_number.get().strip().upper(),
+            'Case_Number': self.case_number.get().strip().upper(),
+            'Examiner_Title': examiner_title,
+            'Examiner_Name': examiner_name,
+            'Examiner_Agency': examiner_agency,
+            'Examiner_Agency_Abbr': examiner_agency_abbr,
+            'Request_Agency': request_agency,
+            'Request_Agency_Abbr': request_agency_abbr,
+            'Request_Title': request_title,
+            'Request_Officer': request_officer,
+            'Request_Officer_Full': request_officer_full,
+            'Request_Date': self.parse_request_date(self.request_date.get().strip()) if hasattr(self, "request_date") else "",
+            'Request_Case': self.primary_case_offense.get().strip(),
+            'Role_Type': role,
+            'Forensic_Software': forensic_software_text,
+            'Report_Software': report_software_text,
+            'Report_Article': report_article,
+            'Processing_Software_List': processing_tools,
+            'Report_Software_List': report_tools,
         }
 
         # Optional time frame if checked
         if self.time_frame_limited_var.get() == 1:
             data['PY_LIMITSTART'] = self.parse_request_date(self.time_frame_start_date.get().strip())
             data['PY_LIMITEND'] = self.parse_request_date(self.time_frame_end_date.get().strip())
+            data['Time_Frame_Start'] = data['PY_LIMITSTART']
+            data['Time_Frame_End'] = data['PY_LIMITEND']
         else:
             data['PY_LIMITSTART'] = ""
             data['PY_LIMITEND'] = ""
+            data['Time_Frame_Start'] = ""
+            data['Time_Frame_End'] = ""
 
         # Create search docs for replacement
         search_docs = {}
-        for key in ['PY_DFR', 'PY_CASENUMBER', 'PY_EXAMINER', 'PY_REQAGENCY', 'PY_REQOFF', 'PY_SERVEDATE', 'PY_RETURNDATE', 'PY_PROVIDER', 'PY_ACCOUNTID', 'PY_DATASIZE', 'PY_LIMITSTART', 'PY_LIMITEND']:
+        for key in ['PY_DFR', 'PY_CASENUMBER', 'PY_EXAMINER', 'PY_REQAGENCY', 'PY_REQOFF', 'PY_SERVEDATE', 'PY_RETURNDATE', 'PY_PROVIDER', 'PY_ACCOUNTID', 'PY_DATASIZE', 'PY_OWNER', 'PY_LIMITSTART', 'PY_LIMITEND']:
             search_docs[key] = Document()
             p = search_docs[key].add_paragraph(data.get(key, ''))
             p.style = search_docs[key].styles['Normal']
 
-        # Add examination summary/details (from your PY_TEXT or other)
-        # Assuming you have a summary field or generate it
         summary_doc = Document()
-        summary_doc.add_paragraph("Examination Summary: [Add details here if needed]")
+        self.generate_paragraphs(data, summary_doc)
         search_docs['PY_TEXT'] = summary_doc
 
-        # Perform replacements
+        doc = Document(self.template_file)
         self.search_and_replace_content_controls_simple(doc, search_docs)
         self.search_and_replace_split_placeholders(doc, search_docs)
 
@@ -617,15 +846,16 @@ class WarrantDataReturns(TkinterDnD.Tk):
             add_text(doc, data.get(key, ''))
 
     def save_document(self, doc):
-        # Build the suggested filename
-        dfr = self.dfr_number.get().strip().upper()
-        provider = self.service_provider.get().strip()
-        account_id = self.account_identifier.get().strip()
-
-        safe_provider = re.sub(r'[^\w\-]', '_', provider) if provider else "UnknownProvider"
-        safe_account = re.sub(r'[^\w\-]', '_', account_id) if account_id else "UnknownAccount"
-
-        filename = f"{dfr} - {safe_provider} ({safe_account}) Return.docx"
+        apply_warrant_suggested_filename(self)
+        filename = ""
+        try:
+            filename = self.output_filename.get().strip()
+        except Exception:
+            filename = ""
+        if not filename:
+            filename = apply_warrant_suggested_filename(self)
+        if filename.lower().endswith(".docx") is False:
+            filename += ".docx"
 
         # Get default save directory from the UI Entry widget (or fallback)
         default_dir = None
@@ -838,7 +1068,7 @@ class WarrantDataReturns(TkinterDnD.Tk):
             doc_xml_str = etree.tostring(doc._element, encoding='unicode')
             original_xml_str = doc_xml_str
 
-            target_placeholders = ['PY_DFR', 'PY_EXAMINER', 'PY_REQAGENCY', 'PY_REQOFF', 'PY_SERVEDATE', 'PY_RETURNDATE', 'PY_PROVIDER', 'PY_ACCOUNTID', 'PY_DATASIZE']
+            target_placeholders = ['PY_DFR', 'PY_EXAMINER', 'PY_REQAGENCY', 'PY_REQOFF', 'PY_SERVEDATE', 'PY_RETURNDATE', 'PY_PROVIDER', 'PY_ACCOUNTID', 'PY_DATASIZE', 'PY_OWNER']
 
             for search_string in target_placeholders:
                 if replaced_strings.get(search_string):
@@ -874,4 +1104,4 @@ if __name__ == "__main__":
     app = WarrantDataReturns()
     app.mainloop()
     
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.1) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.0.3) © 2026 #

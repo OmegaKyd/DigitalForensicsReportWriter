@@ -13,7 +13,7 @@ from tkinter.scrolledtext import ScrolledText
 from tkinterdnd2 import DND_FILES, TkinterDnD
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from settings_manager import SettingsManager
-from ui_theme import apply_theme, add_header_bar, add_action_bar, pack_right_actions, size_window, build_extracted_info_pane, parse_mdy_date, add_date_entry, COLORS, FormTabs, close_and_return
+from ui_theme import apply_theme, add_header_bar, add_action_bar, pack_right_actions, size_window, build_extracted_info_pane, parse_mdy_date, add_date_entry, COLORS, FormTabs, close_and_return, DndToplevel
 from app_menu import attach_app_menu
 from paragraphs_manager import fill_paragraph, load_paragraphs
 from cellebrite_pdf import process_pdf_selection, parse_cellebrite_pdfs_only
@@ -27,6 +27,10 @@ from report_common import (
     unique_output_path,
     apply_suggested_filename,
     show_placeholder_preview,
+    set_extracted_preview,
+    apply_overrides_to_preview_rows,
+    apply_preview_overrides_to_data,
+    overlay_preview_overrides,
     mobile_preview_rows,
     require_device_identity,
     current_dfr_prefix,
@@ -49,9 +53,16 @@ from lxml import etree
 
 #ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
 
-class MobilePortableCase(TkinterDnD.Tk):
+class MobilePortableCase(DndToplevel):
     def __init__(self, master=None):
-        super().__init__()
+        if master is None:
+            master = TkinterDnD.Tk()
+            master.withdraw()
+            owns_root = True
+        else:
+            owns_root = False
+        super().__init__(master)
+        self._owns_hidden_root = owns_root
         
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.master = master
@@ -464,7 +475,7 @@ class MobilePortableCase(TkinterDnD.Tk):
                 "examiner_title": examiner_title_value,
                 "examiner_name": self.examiner_name.get(),
                 "dfr_number_prefix": self.get_dfr_prefix(),
-                "version": "1.0.1"
+                "version": "1.0.3"
             }
             
             self.settings_manager.save_settings(settings_to_save)
@@ -1591,15 +1602,20 @@ class MobilePortableCase(TkinterDnD.Tk):
                 messagebox.showerror("Missing Fields", "\n".join(identity_missing))
                 return
             data = prefer_gui_over_parsed(data, extraction_data)
+            data = apply_preview_overrides_to_data(self, data)
             data['DFR_Num'] = data.get('DFR_Num') or data.get('dfr_num', '')
             if preview_only:
+                set_extracted_preview(self, extraction_data, "mobile")
                 suggested = apply_suggested_filename(self, "MobilePortable", data.get("device_model", ""))
                 show_placeholder_preview(
                     self,
-                    mobile_preview_rows(
-                        data,
-                        officer_text=self.format_case_officer(data) if hasattr(self, "format_case_officer") else data.get("Request_Officer", ""),
-                        image_date=data.get("formatted_date", ""),
+                    apply_overrides_to_preview_rows(
+                        self,
+                        mobile_preview_rows(
+                            data,
+                            officer_text=self.format_case_officer(data) if hasattr(self, "format_case_officer") else data.get("Request_Officer", ""),
+                            image_date=data.get("formatted_date", ""),
+                        ),
                     ),
                     suggested,
                 )
@@ -1778,6 +1794,7 @@ class MobilePortableCase(TkinterDnD.Tk):
         }
         
         # Debug output
+        overlay_preview_overrides(self, replacement_map)
         print("\nGenerating replacement content:")
         
         # Create content for each search string
@@ -2204,4 +2221,4 @@ class MobilePortableCase(TkinterDnD.Tk):
         close_and_return(self)
 
 
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.1) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.0.3) © 2026 #

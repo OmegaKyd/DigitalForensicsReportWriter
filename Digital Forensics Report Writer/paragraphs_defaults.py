@@ -565,7 +565,53 @@ DEFAULT_PARAGRAPHS = {'mobile_full': {'one_a': '\n'
                  'ten': '\n'
                         'Unless requested, I will not be conducting any further examination of the extracted '
                         'data.'},
- 'warrant': {'intro_self': 'On {PY_SERVEDATE}, a search warrant was served on {PY_PROVIDER} for the data '
-                           'related to the user account belonging to {PY_ACCOUNTID}. On {PY_RETURNDATE}, I '
-                           'received the responsive data from {PY_PROVIDER}. This return consisted of '
-                           'approximately {PY_DATASIZE}GB of data.'}}
+ 'warrant': {'intro_self': 'On {Warrant_Service_Date}, a search warrant was served on {Service_Provider} for the data '
+                           'related to the user account belonging to {Account_Owner} ({Account_Identifier}). On {Data_Return_Date}, I '
+                           'received the responsive data from {Service_Provider}. This return consisted of '
+                           'approximately {Data_Size}GB of data.',
+             'one_ca': '\n'
+                       'On {Warrant_Service_Date}, I, {Examiner_Agency_Abbr} {Request_Title} {Request_Officer}, '
+                       'submitted a search warrant to {Service_Provider} for the data related to the '
+                       '{Service_Provider} user account {Account_Identifier} regarding a {Request_Case} '
+                       'investigation.',
+             'one_ca_limited': '\n'
+                               'On {Warrant_Service_Date}, I, {Examiner_Agency_Abbr} {Request_Title} {Request_Officer}, '
+                               'submitted a search warrant to {Service_Provider} for the data related to the '
+                               '{Service_Provider} user account {Account_Identifier} between {Time_Frame_Start} and '
+                               '{Time_Frame_End} regarding a {Request_Case} investigation.',
+             'one_aa': '\n'
+                       'On {Request_Date}, I, {Examiner_Title} {Examiner_Name} with the {Examiner_Agency} '
+                       '({Examiner_Agency_Abbr}), received a request from {Request_Title} {Request_Officer} with '
+                       'the {Request_Agency} ({Request_Agency_Abbr}) to review data obtained pursuant to a search '
+                       'warrant served on {Service_Provider} for the {Service_Provider} user account '
+                       '{Account_Identifier} regarding a {Request_Case} investigation.',
+             'two_aa': '\n'
+                       'On {Request_Date}, {Request_Title} {Request_Officer} provided me with the responsive data '
+                       'from {Service_Provider}. The following information of interest to this investigation was '
+                       'observed relating to the {Service_Provider} account {Account_Identifier}, hereinafter '
+                       'referred to as the "source account".',
+             'two_ca': '\n'
+                       'On {Data_Return_Date}, {Service_Provider} provided responsive data related to the account. '
+                       'The following information of interest to this investigation was observed relating to the '
+                       '{Service_Provider} account {Account_Identifier}, hereinafter referred to as the "source account".',
+             'three_ca': '\n'
+                         'In addition to manually reviewing the data, I used the {Forensic_Software} to process the '
+                         'information that was contained within the responsive data. Using the forensic software, I '
+                         'was able to recover various items of data and information and made the following notable '
+                         'observations.',
+             'three_b': '\n'
+                        'I conducted a manual review of the data and made the following observations:',
+             'four_ca': '\n'
+                        'All the data and information that was of significance or that was of evidentiary value that '
+                        'was observed during the review of the data was tagged and included in {Report_Article} '
+                        '{Report_Software} Digital Report created at the completion of the examination. The information '
+                        'detailed below is a summary of the data and information that is contained in the '
+                        '{Report_Software} Digital Report as well as a description of the contents of each tag that '
+                        'was created.',
+             'four_ca_multi': '\n'
+                              'All the data and information that was of significance or that was of evidentiary value '
+                              'that was observed during the review of the data was tagged and included in '
+                              '{Report_Software} Digital Reports created at the completion of the examination. The '
+                              'information detailed below is a summary of the data and information that is contained '
+                              'in the {Report_Software} Digital Reports as well as a description of the contents of '
+                              'each tag that was created.'}}

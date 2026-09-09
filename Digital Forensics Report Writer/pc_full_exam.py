@@ -13,7 +13,7 @@ from tkinter.scrolledtext import ScrolledText
 from tkinterdnd2 import DND_FILES, TkinterDnD
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from settings_manager import SettingsManager
-from ui_theme import apply_theme, add_header_bar, add_action_bar, pack_right_actions, size_window, build_extracted_info_pane, parse_mdy_date, add_date_entry, COLORS, FormTabs, close_and_return
+from ui_theme import apply_theme, add_header_bar, add_action_bar, pack_right_actions, size_window, build_extracted_info_pane, parse_mdy_date, add_date_entry, COLORS, FormTabs, close_and_return, DndToplevel
 from app_menu import attach_app_menu
 from paragraphs_manager import fill_paragraph, load_paragraphs
 from report_common import (
@@ -25,10 +25,15 @@ from report_common import (
     unique_output_path,
     apply_suggested_filename,
     show_placeholder_preview,
+    set_extracted_preview,
+    apply_overrides_to_preview_rows,
+    apply_preview_overrides_to_data,
+    overlay_preview_overrides,
     pc_preview_rows,
     prefer_gui_over_parsed,
     looks_like_digital_collector_log,
     parse_digital_collector_log,
+    apply_parsed_capacity,
     apply_log_device_fields_to_form,
     merge_log_device_into_report_data,
     load_request_titles,
@@ -51,9 +56,16 @@ from lxml import etree
 
 #ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
 
-class PCFullExam(TkinterDnD.Tk):
+class PCFullExam(DndToplevel):
     def __init__(self, master=None):
-        super().__init__()
+        if master is None:
+            master = TkinterDnD.Tk()
+            master.withdraw()
+            owns_root = True
+        else:
+            owns_root = False
+        super().__init__(master)
+        self._owns_hidden_root = owns_root
         
         self.role_type = None # Initialize to avoid AttributeError
 
@@ -313,7 +325,8 @@ class PCFullExam(TkinterDnD.Tk):
         self.sw_date_frame = ttk.Frame(self.case_agent_frame)
         self.sw_date_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=2)
 
-        ttk.Label(self.sw_date_frame, text="Search Warrant Service Date (M/D/Y):").grid(row=0, column=0, sticky="w", pady=2)
+        self.sw_date_label = ttk.Label(self.sw_date_frame, text="Search Warrant Service Date (M/D/Y):")
+        self.sw_date_label.grid(row=0, column=0, sticky="w", pady=2)
         self.sw_service_date = add_date_entry(self.sw_date_frame, row=0, column=1)
 
         # Time Frame Section for Case Agent (initially visible since default is Search Warrant)
@@ -588,7 +601,7 @@ class PCFullExam(TkinterDnD.Tk):
                 "examiner_title": examiner_title_value,
                 "examiner_name": self.examiner_name.get(),
                 "dfr_number_prefix": self.get_dfr_prefix(),
-                "version": "1.0.1"
+                "version": "1.0.3"
             }
             
             self.settings_manager.save_settings(settings_to_save)
@@ -672,6 +685,7 @@ class PCFullExam(TkinterDnD.Tk):
         self.artifacts_button_frame.grid(row=1, column=0, columnspan=2, sticky="w", pady=5)
 
         self.selected_artifacts = []
+        self.selected_artifact_sources = {}
         self.select_artifacts_button = ttk.Button(
             self.artifacts_button_frame, 
             text="Select Artifacts", 
@@ -717,6 +731,7 @@ class PCFullExam(TkinterDnD.Tk):
                 self.artifacts_count_label.pack_forget()
             # Clear artifacts when Axiom is deselected
             self.selected_artifacts = []
+            self.selected_artifact_sources = {}
 
 
     def toggle_artifacts_button(self, event=None):
@@ -732,6 +747,7 @@ class PCFullExam(TkinterDnD.Tk):
             self.artifacts_count_label.pack_forget()
             # Clear any selected artifacts when switching away from Axiom
             self.selected_artifacts = []
+            self.selected_artifact_sources = {}
 
     def update_artifacts_count_label(self):
         count = len(self.selected_artifacts) if hasattr(self, 'selected_artifacts') else 0
@@ -1013,6 +1029,8 @@ class PCFullExam(TkinterDnD.Tk):
                     ('case_number', 'Case Number'),
                     ('case_id', 'Case ID'),
                     ('device_model', 'Source Device Model'),
+                    ('device_serial', 'Source Device Serial'),
+                    ('device_capacity', 'Capacity'),
                     ('case_notes', 'Case Notes'),
                     ('md5_hash', 'MD5 Hash'),
                 ]
@@ -1023,6 +1041,8 @@ class PCFullExam(TkinterDnD.Tk):
                     ('case_number', 'Case Number'),
                     ('evidence_number', 'Evidence Number'),
                     ('device_model', 'Source Device Model'),
+                    ('device_serial', 'Source Device Serial'),
+                    ('device_capacity', 'Capacity'),
                     ('case_notes', 'Description'),
                     ('md5_hash', 'MD5 Hash'),
                 ]
@@ -1031,6 +1051,8 @@ class PCFullExam(TkinterDnD.Tk):
                     ('formatted_date', 'Extraction Date/Time'),
                     ('xways_OS', 'X-Ways Version'),
                     ('device_model', 'Source Device Model'),
+                    ('device_serial', 'Source Device Serial'),
+                    ('device_capacity', 'Capacity'),
                     ('case_notes', 'Internal Description'),
                     ('md5_hash', 'MD5 Hash'),
                 ]
@@ -1119,11 +1141,6 @@ class PCFullExam(TkinterDnD.Tk):
         if hasattr(self, 'case_agent_time_frame_end'):
             self.case_agent_time_frame_end.delete(0, tk.END)
         
-        # Hide search warrant date fields when switching roles
-        if hasattr(self, 'sw_date_frame'):
-            for widget in self.sw_date_frame.winfo_children():
-                widget.grid_remove()
-        
         # Now show/hide the appropriate frame
         if self.role_type.get() == "Agency Assist":
             self.agency_assist_frame.pack(fill=tk.X, padx=5, pady=5)
@@ -1137,18 +1154,17 @@ class PCFullExam(TkinterDnD.Tk):
             self.toggle_sw_date_and_time_frame()
 
     def toggle_sw_date(self, event=None):
-        if hasattr(self, 'legal_self') and self.legal_self.get() == 'Search Warrant':
-            # Show the SW date frame
-            if hasattr(self, 'sw_date_frame'):
-                self.sw_date_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=2)
-        else:
-            # Hide the SW date frame and clear its value
-            if hasattr(self, 'sw_date_frame'):
-                self.sw_date_frame.grid_remove()
-                
-                # Clear the SW service date field when hiding it
-                if hasattr(self, 'sw_service_date'):
-                    self.sw_service_date.delete(0, tk.END)
+        if not hasattr(self, 'sw_date_frame'):
+            return
+        self.sw_date_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=2)
+        warrant = hasattr(self, 'legal_self') and self.legal_self.get() == 'Search Warrant'
+        if hasattr(self, 'sw_date_label'):
+            self.sw_date_label.configure(
+                text="Search Warrant Service Date (M/D/Y):" if warrant else "Date of Possession (M/D/Y):"
+            )
+            self.sw_date_label.grid(row=0, column=0, sticky="w", pady=2)
+        if hasattr(self, 'sw_service_date') and getattr(self.sw_service_date, "master", None) is not None:
+            self.sw_service_date.master.grid(row=0, column=1, sticky="ew", pady=2)
 
     def toggle_title_entry(self, event=None):
         if self.request_title_type.get() == "Other (specify)":
@@ -1237,6 +1253,7 @@ class PCFullExam(TkinterDnD.Tk):
                 extraction_data = self.parse_log_file()
                 apply_log_device_fields_to_form(self, extraction_data)
                 self.update_info_display(data=extraction_data)
+                apply_suggested_filename(self, "PC", (extraction_data or {}).get("device_model", ""))
                 
                 # No popup messages - the file type will be shown in the display window header
             else:
@@ -1396,7 +1413,7 @@ class PCFullExam(TkinterDnD.Tk):
         if 'formatted_date' not in extraction_data:
             extraction_data['formatted_date'] = "Unknown Date"
             self.log_populated_fields.add('formatted_date')
-        
+        apply_parsed_capacity(extraction_data, content, self.log_populated_fields)
         return extraction_data
     
     def parse_xways_date(self, date_str):
@@ -1530,7 +1547,7 @@ class PCFullExam(TkinterDnD.Tk):
             extraction_data['formatted_date'] = extraction_data['extraction_date']
         else:
             extraction_data['formatted_date'] = "Unknown Date"
-                
+        apply_parsed_capacity(extraction_data, content, self.log_populated_fields)
         return extraction_data
     
     def parse_ftk_log(self, content):
@@ -1600,7 +1617,7 @@ class PCFullExam(TkinterDnD.Tk):
         if 'formatted_date' not in extraction_data:
             extraction_data['formatted_date'] = "Unknown Date"
             self.log_populated_fields.add('formatted_date')
-        
+        apply_parsed_capacity(extraction_data, content, self.log_populated_fields)
         return extraction_data
    
     def parse_tx1_date(self, date_str):
@@ -1689,711 +1706,18 @@ class PCFullExam(TkinterDnD.Tk):
         self.paragraphs = load_paragraphs("pc_full")
 
     def select_artifacts_popup(self, device_type):
-        artifacts = []
-        previously_selected = self.selected_artifacts if hasattr(self, 'selected_artifacts') else []
-        
-        left_artifacts = [
-            "Operating System Information",
-            "File System Information", 
-            "Jump Lists",
-            "Keyword Searches",
-            "LNK Files",
-            "MRU Opened/Saved Files",
-            "MRU Recent Files And Folders",
-            "Recycle Bin",
-            "Installed Programs",
-            "Microsoft Installed Programs",
-            "USB Devices",
-            "Encrypted Files",
-            "Encryption / Anti-forensic Tools",
-        ]
-        
-        middle_artifacts = [
-            "Dropbox",
-            "Google Drive",
-            "OneDrive",
-            "Torrent File Fragments",
-            "EML(X) Files",
-            "Gmail Fragments",
-            "Gmail Webmail",
-            "MBOX Emails",
-            "Outlook Emails",
-            "Windows Mail",
-            "Google Maps",
-        ]
-        
-        browser_artifacts = [
-            "Chrome",
-            "Edge",
-            "Firefox",
-            "Opera",
-        ]
-        
-        right_artifacts = [
-            "Google Docs",
-            "Microsoft Excel Documents",
-            "Microsoft Word Documents",
-            "PDF Documents",
-            "Text Documents",
-            "Audio",
-            "VLC Recently Played Files",
-            "Pictures",
-            "Videos",
-        ]
-        
-        selection_window = tk.Toplevel(self)
-        selection_window.title("Select Artifacts to Include")
-        
-        screen_width = self.winfo_screenwidth()
-        screen_height = self.winfo_screenheight()
-        
-        popup_width = 1050
-        popup_height = 600
-        
-        x_position = (screen_width - popup_width) // 2
-        y_position = (screen_height - popup_height) // 2
-        
-        selection_window.geometry(f"{popup_width}x{popup_height}+{x_position}+{y_position}")
-        
-        selection_window.transient(self)
-        selection_window.grab_set()
-        
-        main_frame = ttk.Frame(selection_window)
-        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        instruction_frame = ttk.Frame(main_frame)
-        instruction_frame.pack(fill="x", pady=5)
+        from magnet_artifacts import pick_artifacts
+        return pick_artifacts(self, device_class="computer", device_type=device_type)
 
-        instruction_text = ttk.Label(
-            instruction_frame,
-            text="Select common artifacts tagged during examination:",
-            wraplength=900,
-            justify="left",
-            font=("Arial", 10)
-        )
-        instruction_text.pack(anchor="w")
-
-        separator = ttk.Separator(main_frame, orient="horizontal")
-        separator.pack(fill="x", pady=5)
-        
-        canvas_frame = ttk.Frame(main_frame)
-        canvas_frame.pack(fill="both", expand=True)
-        
-        canvas = tk.Canvas(canvas_frame)
-        scrollbar = ttk.Scrollbar(canvas_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
-        
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-        
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        
-        columns_container = ttk.Frame(scrollable_frame)
-        columns_container.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        left_column = ttk.LabelFrame(columns_container, text="System Artifacts", padding=10)
-        left_column.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
-        
-        middle_column = ttk.LabelFrame(columns_container, text="Cloud & Communication Artifacts", padding=10)
-        middle_column.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
-        
-        browser_column = ttk.LabelFrame(columns_container, text="Browser Artifacts", padding=10)
-        browser_column.grid(row=0, column=2, sticky="nsew", padx=5, pady=5)
-        
-        right_column = ttk.LabelFrame(columns_container, text="Media Artifacts", padding=10)
-        right_column.grid(row=0, column=3, sticky="nsew", padx=5, pady=5)
-        
-        for i in range(4):
-            columns_container.columnconfigure(i, weight=1, uniform="column")
-        columns_container.rowconfigure(0, weight=1)
-        
-        artifact_vars = {}
-        checkbox_widgets = {}
-        subtag_frames = {}
-        
-        def create_artifact_checkboxes(column_frame, artifact_list):
-            for artifact in artifact_list:
-                artifact_frame = ttk.Frame(column_frame)
-                artifact_frame.pack(anchor="w", fill="x", pady=2)
-                
-                var = tk.IntVar(selection_window)
-                
-                if artifact in previously_selected:
-                    var.set(1)
-                else:
-                    var.set(0)
-                
-                cb = ttk.Checkbutton(
-                    artifact_frame,
-                    text=artifact,
-                    variable=var,
-                    onvalue=1,
-                    offvalue=0
-                )
-                cb.pack(anchor="w", padx=5, pady=2)
-                
-                artifact_vars[artifact] = var
-                checkbox_widgets[artifact] = cb
-                
-                if artifact in ["Pictures", "Videos", "Chrome", "Edge", "Firefox", "Opera"]:
-                    subtag_container = ttk.Frame(artifact_frame)
-                    subtag_frames[artifact] = subtag_container
-                    
-                    if artifact == "Pictures" or artifact == "Videos":
-                        subtags = ["Child Pornography", "Child Erotica", "Age Difficult"]
-                    elif artifact == "Chrome":
-                        subtags = ["Autofill", "Bookmarks", "Current Tabs", "Downloads", "Keyword Search Terms", "Web History", "Web Visits"]
-                    elif artifact == "Edge":
-                        subtags = ["Autofill", "Bookmarks", "Current Tabs", "Downloads", "Keyword Search Terms", "Web History", "Web Visits"]
-                    elif artifact == "Firefox":
-                        subtags = ["Bookmarks", "Downloads", "Private Browsing History", "Web History", "Web Visits"]
-                    elif artifact == "Opera":
-                        subtags = ["Autofill", "Bookmarks", "Current Tabs", "Downloads", "Keyword Search Terms", "Web History", "Web Visits"]
-                    
-                    for subtag in subtags:
-                        subtag_name = f"{artifact} -- {subtag}"
-                        subvar = tk.IntVar(selection_window)
-                        
-                        if subtag_name in previously_selected:
-                            subvar.set(1)
-                        else:
-                            subvar.set(0)
-                        
-                        sub_cb = ttk.Checkbutton(
-                            subtag_container,
-                            text=f"{subtag}",
-                            variable=subvar,
-                            onvalue=1,
-                            offvalue=0
-                        )
-                        sub_cb.pack(anchor="w", padx=20, pady=1)
-                        
-                        artifact_vars[subtag_name] = subvar
-                    
-                    if artifact in previously_selected:
-                        subtag_container.pack(anchor="w", fill="x")
-                    else:
-                        subtag_container.pack_forget()
-                    
-                    def make_toggle_function(artifact_name, container):
-                        def toggle_func(*args):
-                            if artifact_vars[artifact_name].get() == 1:
-                                container.pack(anchor="w", fill="x")
-                            else:
-                                container.pack_forget()
-                                for key, var in artifact_vars.items():
-                                    if key.startswith(f"{artifact_name} -- "):
-                                        var.set(0)
-                        return toggle_func
-                    
-                    toggle_func = make_toggle_function(artifact, subtag_container)
-                    var.trace("w", toggle_func)
-        
-        create_artifact_checkboxes(left_column, left_artifacts)
-        create_artifact_checkboxes(middle_column, middle_artifacts)
-        create_artifact_checkboxes(browser_column, browser_artifacts)
-        create_artifact_checkboxes(right_column, right_artifacts)
-        
-        button_frame = ttk.Frame(main_frame)
-        button_frame.pack(fill="x", pady=10)
-        
-        def select_all():
-            for key, var in artifact_vars.items():
-                if not key.startswith("Pictures -- ") and not key.startswith("Videos -- ") and not key.startswith("Chrome -- ") and not key.startswith("Edge -- ") and not key.startswith("Firefox -- ") and not key.startswith("Opera -- "):
-                    var.set(1)
-            for artifact in ["Pictures", "Videos", "Chrome", "Edge", "Firefox", "Opera"]:
-                if artifact in subtag_frames:
-                    subtag_frames[artifact].pack(anchor="w", fill="x")
-        
-        def deselect_all():
-            for key, var in artifact_vars.items():
-                var.set(0)
-            for artifact in ["Pictures", "Videos", "Chrome", "Edge", "Firefox", "Opera"]:
-                if artifact in subtag_frames:
-                    subtag_frames[artifact].pack_forget()
-        
-        select_all_button = ttk.Button(button_frame, text="Select All", command=select_all)
-        select_all_button.pack(side="left", padx=5)
-        
-        deselect_all_button = ttk.Button(button_frame, text="Deselect All", command=deselect_all)
-        deselect_all_button.pack(side="left", padx=5)
-        
-        def on_done():
-            nonlocal artifacts
-            artifacts = []  
-            
-            for artifact_name, var in artifact_vars.items():
-                if var.get() == 1:
-                    artifacts.append(artifact_name)
-            
-            selection_window.destroy()
-        
-        done_button = ttk.Button(button_frame, text="Done", command=on_done)
-        done_button.pack(side="right", padx=5)
-        
-        def on_mousewheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        
-        canvas.bind_all("<MouseWheel>", on_mousewheel)
-        
-        self.wait_window(selection_window)
-        
-        try:
-            canvas.unbind_all("<MouseWheel>")
-        except:
-            pass
-        
-        return artifacts
-    
     def generate_artifact_paragraphs(self, doc, selected_artifacts):
-        # Mapping PC artifact names to their descriptions and tag names
-        pc_artifacts = {
-            "Operating System Information": {
-                "description": "Operating System Information contains details about the Windows operating system installed on the computer, including version, build number, installation date, and system configuration settings.",
-                "tag": "Operating System Information"
-            },
-            "File System Information": {
-                "description": "Information pertaining to the File System that was searched.",
-                "tag": "File System Information"
-            },
-            "Jump Lists": {
-                "description": "Jump lists are quick lists of recent applications or files that a user launched.",
-                "tag": "Jump Lists"
-            },
-            "Keyword Searches": {
-                "description": "A list of keywords that were searched for on the system.",
-                "tag": "Keyword Searches"
-            },
-            "LNK Files": {
-                "description": "LNK files are Windows shortcut files that point to other files on the system.",
-                "tag": "LNK Files"
-            },
-            "MRU Opened/Saved Files": {
-                "description": "MRU Opened/Saved Files contains information about last files accessed by any application through 'Open File' or 'Save File' dialog window. Windows versions above XP use PIDL to store file path. PIDL paths might contain GUIDs instead of relative path strings.",
-                "tag": "MRU Opened/Saved Files"
-            },
-            "MRU Recent Files And Folders": {
-                "description": "The MRU Recent Files And Folders artifact contains information about files that were recently opened or saved and folders that were opened. This data is often related to items found in the Recent folder in the Users directory.",
-                "tag": "MRU Recent Files And Folders"
-            },
-            "Recycle Bin": {
-                "description": "Recycle Bin displays all items that were moved to the Recycle Bin.",
-                "tag": "Recycle Bin"
-            },
-            "Microsoft Installed Programs": {
-                "description": "Installed Microsoft Programs contains applications installed on the machine which are published by Microsoft.",
-                "tag": "Microsoft Installed Programs"
-            },
-            "Installed Programs": {
-                "description": "Installed Programs contain applications installed on the machine which are not published by Microsoft.",
-                "tag": "Installed Programs"
-            },
-            "USB Devices": {
-                "description": "USB Devices contains a history of all USB devices that have been connected to the system.",
-                "tag": "USB Devices"
-            },
-            "Encrypted Files": {
-                "description": "Encrypted Files contains information about any files that have been recovered on the system that are encrypted",
-                "tag": "Encrypted Files"
-            },
-            "Encryption / Anti-forensic Tools": {
-                "description": "Encryption/Anti-forensics Tools contains the encryption or anti-forensics tool(s) that have been found in the searched evidence.",
-                "tag": "Encryption / Anti-forensic Tools"
-            },
-            "Dropbox": {
-                "description": "Dropbox contains information about files that users uploaded and synced to Dropbox.",
-                "tag": "Dropbox"
-            },
-            "Google Drive": {
-                "description": "Google Drive is a file hosting service that allows users to upload and sync files to a cloud service.",
-                "tag": "Google Drive"
-            },
-            "OneDrive": {
-                "description": "These are artifacts left behind using OneDrive to upload and view files via the web or through the OneDrive desktop application. Data recovered can include file names, dates and times, user IDs, file sizes, sharing settings, and more.",
-                "tag": "OneDrive"
-            },
-            "Torrent File Fragments": {
-                "description": "Torrent File Fragments contains data that is carved or parsed from .torrent files that are used to download torrents from various networks on the Internet.",
-                "tag": "Torrent File Fragments"
-            },
-            "EML(X) Files": {
-                "description": "EML(X) Files contains the emails in .eml and .emlx formats, that have been found on the device.",
-                "tag": "EML(X) Files"
-            },
-            "Gmail Fragments": {
-                "description": "Gmail Email Fragments contains the Gmail email fragments that were recovered from a Windows or OS X computer.",
-                "tag": "Gmail Fragments"
-            },
-            "Gmail Webmail": {
-                "description": "Gmail is a webmail website that allows users to send and receive emails.",
-                "tag": "Gmail Webmail"
-            },
-            "MBOX Emails": {
-                "description": "MBOX is the default format used in Linux mail clients such as Thunderbird.",
-                "tag": "MBOX Emails"
-            },
-            "Outlook Emails": {
-                "description": "Microsft Outlook is a personal information manager and email client. This table captures information related to emails sent and received in Outlook.",
-                "tag": "Outlook Emails"
-            },
-            "Windows Mail": {
-                "description": "Windows Mail contains email messages sent or received using Windows Mail.",
-                "tag": "Windows Mail"
-            },
-            "Google Maps": {
-                "description": "Google Maps is a free web service that allows users to get directions.",
-                "tag": "Google Maps"
-            },
-            "Chrome": {
-                "description": "Google Chrome web browser artifacts containing various browsing data.",
-                "tag": "Chrome"
-            },
-            "Chrome -- Autofill": {
-                "description": "Chrome Autofill contains records of the autofill values that Chrome saves for different types of text fields.",
-                "tag": "Chrome Autofill"
-            },
-            "Chrome -- Bookmarks": {
-                "description": "Chrome Bookmarks contains browser bookmarks that reference saved webpages.",
-                "tag": "Chrome Bookmarks"
-            },
-            "Chrome -- Current Tabs": {
-                "description": "Chrome Current Tabs contains information about the tabs that are open in the current browser session.",
-                "tag": "Chrome Current Tabs"
-            },
-            "Chrome -- Downloads": {
-                "description": "Chrome Downloads contains information about the files that a user downloads from the Internet.",
-                "tag": "Chrome Downloads"
-            },
-            "Chrome -- Keyword Search Terms": {
-                "description": "Chrome Keyword Search Terms contains information about the keyword search terms that a user enters.",
-                "tag": "Chrome Keyword Search Terms"
-            },
-            "Chrome -- Web History": {
-                "description": "Chrome Web History contains a history of the websites that the user visits (includes unique visits only).",
-                "tag": "Chrome Web History"
-            },
-            "Chrome -- Web Visits": {
-                "description": "Chrome Web Visits contains a history of the websites that the user visits (includes all visits).",
-                "tag": "Chrome Web Visits"
-            },
-            "Edge": {
-                "description": "Microsoft Edge web browser artifacts containing various browsing data.",
-                "tag": "Edge"
-            },
-            "Edge -- Autofill": {
-                "description": "Edge Autofill contains records of the autofill values that Edge saves for different types of text fields.",
-                "tag": "Edge Autofill"
-            },
-            "Edge -- Bookmarks": {
-                "description": "Edge Bookmarks contains browser bookmarks that reference saved webpages.",
-                "tag": "Edge Bookmarks"
-            },
-            "Edge -- Current Tabs": {
-                "description": "Edge Current Tabs contains information about the tabs that are open in the current browser session.",
-                "tag": "Edge Current Tabs"
-            },
-            "Edge -- Downloads": {
-                "description": "Edge Downloads contains information about the files that a user downloads from the Internet.",
-                "tag": "Edge Downloads"
-            },
-            "Edge -- Keyword Search Terms": {
-                "description": "Edge Keyword Search Terms contains information about the keyword search terms that a user enters.",
-                "tag": "Edge Keyword Search Terms"
-            },
-            "Edge -- Web History": {
-                "description": "Edge Web History contains a history of the websites that the user visits (includes unique visits only).",
-                "tag": "Edge Web History"
-            },
-            "Edge -- Web Visits": {
-                "description": "Edge Web Visits contains a history of the websites that the user visits (includes all visits).",
-                "tag": "Edge Web Visits"
-            },
-            "Firefox": {
-                "description": "Mozilla Firefox web browser artifacts containing various browsing data.",
-                "tag": "Firefox"
-            },
-            "Firefox -- Bookmarks": {
-                "description": "Firefox Bookmarks contains the bookmarks from the Firefox web browser on a device.",
-                "tag": "Firefox Bookmarks"
-            },
-            "Firefox -- Downloads": {
-                "description": "Firefox Downloads contains the downloads from the Firefox web browser on a device.",
-                "tag": "Firefox Downloads"
-            },
-            "Firefox -- Private Browsing History": {
-                "description": "Firefox Private Browsing History contains the URLs that were loaded during a Private Browsing session from the Firefox web browser on a device.",
-                "tag": "Firefox Private Browsing History"
-            },
-            "Firefox -- Web History": {
-                "description": "Firefox Web History contains the webpages from the last active session from the Firefox web browser on a device.",
-                "tag": "Firefox Web History"
-            },
-            "Firefox -- Web Visits": {
-                "description": "Firefox Web Visits contains all of the non-archived URL visits for Firefox.",
-                "tag": "Firefox Web Visits"
-            },
-            "Opera": {
-                "description": "Opera web browser artifacts containing various browsing data.",
-                "tag": "Opera"
-            },
-            "Opera -- Autofill": {
-                "description": "Opera Autofill contains records of the autofill values that Opera saves for different types of text fields.",
-                "tag": "Opera Autofill"
-            },
-            "Opera -- Bookmarks": {
-                "description": "Opera is a web browser developed by Opera Software, and uses the Blink layout engine. Opera runs on Microsoft Windows and OS X operating systems.",
-                "tag": "Opera Bookmarks"
-            },
-            "Opera -- Current Tabs": {
-                "description": "Opera is a web browser developed by Opera Software, and Opera uses the Blink layout engine. Opera runs on Microsoft Windows and OS X operating systems.",
-                "tag": "Opera Current Tabs"
-            },
-            "Opera -- Downloads": {
-                "description": "Opera is a web browser developed by Opera Software, and uses the Blink layout engine. Opera runs on Microsoft Windows and OS X operating systems.",
-                "tag": "Opera Downloads"
-            },
-            "Opera -- Keyword Search Terms": {
-                "description": "Opera Keyword Search Terms contains information about the keyword search terms that a user entered.",
-                "tag": "Opera Keyword Search Terms"
-            },
-            "Opera -- Web History": {
-                "description": "Opera is a web browser developed by Opera Software. Web history are recently visited webpages. Opera stores a user's browsing history so that he or she can view it later. This search carves and parses web history from the Opera web browser, including the typed history (i.e. URLs or search terms entered by the user).",
-                "tag": "Opera Web History"
-            },
-            "Opera -- Web Visits": {
-                "description": "Opera Web Visits contains a history of the websites that the user visits (includes all visits).",
-                "tag": "Opera Web Visits"
-            },  
-            "Google Docs": {
-                "description": "Google Docs is a word processing suite available to all Google account holders.",
-                "tag": "Google Docs"
-            },
-            "Microsoft Excel Documents": {
-                "description": "Microsoft Excel is a spreadsheet processor developed by Microsoft.",
-                "tag": "Microsoft Excel Documents"
-            },
-            "Microsoft Word Documents": {
-                "description": "Microsoft Word is a word processor developed by Microsoft.",
-                "tag": "Microsoft Word Documents"
-            },
-            "PDF Documents": {
-                "description": "Portable Document Format (PDF) is a file format used to present documents in a manner independent of application software, hardware, and operating systems. This table captures documents in this file format, extracted from the filesystem and carved from unallocated space.",
-                "tag": "PDF Documents"
-            },
-            "Text Documents": {
-                "description": "Text documents (.txt) that are located on the system",
-                "tag": "Text Documents"
-            },
-            "Audio": {
-                "description": "Audio contains audio files that are recovered that use the .mp3 or .wav formats.",
-                "tag": "Audio"
-            },
-            "VLC Recently Played Files": {
-                "description": "VLC Recently Played Files contains information about the media files that are played using the VLC Media Player. This artifact can reveal information on the user's interaction with the application.",
-                "tag": "VLC Recently Played Files"
-            },
-            "Pictures": {
-                "description": "Pictures contains image files recovered from the computer storage, including photographs, graphics, and other visual media files in various formats.",
-                "tag": "Pictures"
-            },
-            "Pictures -- Child Pornography": {
-                "description": "The image files contained in this tag appear to depict child pornography. Child pornography consists of any visual depiction, including photographs, film, videos, or pictures depicting sexually explicit conduct. \"Sexually explicit conduct\" means material depicting any person under the age of 18 years engaged in graphic sexual intercourse, including genital-genital, oral-genital, anal-genital, or oral-anal whether between persons of the same or opposite sex, or lascivious simulated sexual intercourse where the genitals, breast or pubic area of any person is exhibited. In addition, any material depicting a minor involved in bestiality; masturbation; sadistic or masochistic abuse; or lascivious exhibition of the genitals or pubic area.",
-                "tag": "Pictures -- Child Pornography"
-            },
-            "Pictures -- Child Erotica": {
-                "description": "The image files contained in this tag do not meet the statutory requirement to be considered child pornography. These image files depict juvenile subjects who are shown wearing sexually suggestive clothing, posing in sexually suggestive positions, or that appear to be possessed for a sexual purpose. Image files of this nature are often referred to as \"child erotica\" by forensic examiners and investigators.",
-                "tag": "Pictures -- Child Erotica"
-            },
-            "Pictures -- Age Difficult": {
-                "description": "The image files in this tag are pornographic in nature and depict younger looking subjects who may be juveniles under the age of 18, or may be young adults who are 18 years of age or older. Therefore, without positive identification of the subjects shown in the image files in this tag, I cannot make an accurate determination regarding the legal or illegal nature of the image files. Pornographic image files and video files of this nature are often referred to as \"age difficult\" pornography by forensic examiners and investigators.",
-                "tag": "Pictures -- Age Difficult"
-            },
-            "Videos": {
-                "description": "Videos contains video files recovered from the computer storage, including movies, recordings, and other multimedia content in various video formats.",
-                "tag": "Videos"
-            },
-            "Videos -- Child Pornography": {
-                "description": "The video files contained in this tag appear to depict child pornography. Child pornography consists of any visual depiction, including photographs, film, videos, or pictures depicting sexually explicit conduct. \"Sexually explicit conduct\" means material depicting any person under the age of 18 years engaged in graphic sexual intercourse, including genital-genital, oral-genital, anal-genital, or oral-anal whether between persons of the same or opposite sex, or lascivious simulated sexual intercourse where the genitals, breast or pubic area of any person is exhibited. In addition, any material depicting a minor involved in bestiality; masturbation; sadistic or masochistic abuse; or lascivious exhibition of the genitals or pubic area.",
-                "tag": "Videos -- Child Pornography"
-            },
-            "Videos -- Child Erotica": {
-                "description": "The video files contained in this tag do not meet the statutory requirement to be considered child pornography. These video files depict juvenile subjects who are shown wearing sexually suggestive clothing, posing in sexually suggestive positions, or that appear to be possessed for a sexual purpose. Video files of this nature are often referred to as \"child erotica\" by forensic examiners and investigators.",
-                "tag": "Videos -- Child Erotica"
-            },
-            "Videos -- Age Difficult": {
-                "description": "The video files in this tag are pornographic in nature and depict younger looking subjects who may be juveniles under the age of 18, or may be young adults who are 18 years of age or older. Therefore, without positive identification of the subjects shown in the video files in this tag, I cannot make an accurate determination regarding the legal or illegal nature of the video files. Video files of this nature are often referred to as \"age difficult\" pornography by forensic examiners and investigators.",
-                "tag": "Videos -- Age Difficult"
-            },
-        }
-        
-        predefined_order = [
-            "Operating System Information",
-            "File System Information", 
-            "Jump Lists",
-            "Keyword Searches",
-            "LNK Files",
-            "MRU Opened/Saved Files",
-            "MRU Recent Files And Folders",
-            "Recycle Bin",
-            "Installed Programs",
-            "Microsoft Installed Programs",
-            "USB Devices",
-            "Encrypted Files",
-            "Encryption / Anti-forensic Tools",
-            
-            "Dropbox",
-            "Google Drive",
-            "OneDrive",
-            "Torrent File Fragments",
-            "EML(X) Files",
-            "Gmail Fragments",
-            "Gmail Webmail",
-            "MBOX Emails",
-            "Outlook Emails",
-            "Windows Mail",
-            "Google Maps",
-            
-            "Chrome",
-            "Chrome -- Autofill",
-            "Chrome -- Bookmarks",
-            "Chrome -- Current Tabs",
-            "Chrome -- Downloads",
-            "Chrome -- Keyword Search Terms",
-            "Chrome -- Web History",
-            "Chrome -- Web Visits",
-            "Edge",
-            "Edge -- Autofill",
-            "Edge -- Bookmarks",
-            "Edge -- Current Tabs",
-            "Edge -- Downloads",
-            "Edge -- Keyword Search Terms",
-            "Edge -- Web History",
-            "Edge -- Web Visits",
-            "Firefox",
-            "Firefox -- Bookmarks",
-            "Firefox -- Downloads",
-            "Firefox -- Private Browsing History",
-            "Firefox -- Web History",
-            "Firefox -- Web Visits",
-            "Opera",
-            "Opera -- Autofill",
-            "Opera -- Bookmarks",
-            "Opera -- Current Tabs",
-            "Opera -- Downloads",
-            "Opera -- Keyword Search Terms",
-            "Opera -- Web History",
-            "Opera -- Web Visits",
-            
-            "Google Docs",
-            "Microsoft Excel Documents",
-            "Microsoft Word Documents",
-            "PDF Documents",
-            "Text Documents",
-            "Audio",
-            "VLC Recently Played Files",
-            "Pictures",
-            "Pictures -- Child Pornography",
-            "Pictures -- Child Erotica",
-            "Pictures -- Age Difficult",
-            "Videos",
-            "Videos -- Child Pornography",
-            "Videos -- Child Erotica",
-            "Videos -- Age Difficult",
-        ]
-        
-        organized_artifacts = []
-        for artifact in predefined_order:
-            if artifact in selected_artifacts:
-                organized_artifacts.append(artifact)
-        
-        from docx.oxml.shared import qn
-        from docx.shared import Inches
-        
-        for artifact in organized_artifacts:
-            if artifact in pc_artifacts:
-                is_pictures_or_videos_subtag = (artifact.startswith("Pictures -- ") or 
-                                               artifact.startswith("Videos -- "))
-                
-                is_other_subtag = (" -- " in artifact and not is_pictures_or_videos_subtag)
-                
-                is_main_category = " -- " not in artifact
-                
-                if is_main_category or is_other_subtag:
-                    p = doc.add_paragraph()
-                    
-                    pPr = p._element.get_or_add_pPr()
-                    numPr = pPr.get_or_add_numPr()
-                    numPr.get_or_add_ilvl().val = 0
-                    numPr.get_or_add_numId().val = 1
-                    
-                    p.paragraph_format.left_indent = Inches(0.25)
-                    p.paragraph_format.first_line_indent = Inches(-0.25)
-                    
-                    # Use the full artifact name for browser artifacts
-                    if is_other_subtag and any(browser in artifact for browser in ["Chrome", "Edge", "Firefox", "Opera"]):
-                        # For browser artifacts, use the full name but format it properly
-                        display_name = artifact.replace(" -- ", " ").upper()
-                    elif is_other_subtag:
-                        # For non-browser subtags, use just the part after --
-                        display_name = artifact.split(" -- ")[1].upper()
-                    else:
-                        # For main categories, use the full name
-                        display_name = artifact.upper()
-                    
-                    run = p.add_run(display_name)
-                    run.font.bold = True
-                    run.font.name = 'Arial'
-                    run.font.size = Pt(11)
-                    
-                    doc.add_paragraph()
-                    
-                    p = doc.add_paragraph()
-                    p.style = doc.styles['Normal']
-                    run = p.add_run(pc_artifacts[artifact]["description"])
-                    run.font.name = 'Arial'
-                    run.font.size = Pt(11)
-                    
-                    doc.add_paragraph()
-                    
-                    p = doc.add_paragraph()
-                    p.style = doc.styles['Normal']
-                    run = p.add_run(f"Tag: {pc_artifacts[artifact]['tag']}")
-                    run.font.underline = True
-                    run.font.name = 'Arial'
-                    run.font.size = Pt(11)
-                    
-                else:
-                    # For Pictures/Videos subtags, keep existing logic
-                    p = doc.add_paragraph()
-                    p.style = doc.styles['Normal']
-                    run = p.add_run(f"Tag: {pc_artifacts[artifact]['tag']}")
-                    run.font.underline = True
-                    run.font.name = 'Arial'
-                    run.font.size = Pt(11)
-                    
-                    doc.add_paragraph()
-                    
-                    p = doc.add_paragraph()
-                    p.style = doc.styles['Normal']
-                    run = p.add_run(pc_artifacts[artifact]["description"])
-                    run.font.name = 'Arial'
-                    run.font.size = Pt(11)
-                
-                doc.add_paragraph()
-                
-                p = doc.add_paragraph()
-                p.style = doc.styles['Normal']
-                run = p.add_run("(DEVICE ARTIFACTS)\n")
-                run.font.name = 'Arial'
-                run.font.size = Pt(11)
-                
-                doc.add_paragraph()
+        from magnet_artifacts import write_artifact_paragraphs
+        write_artifact_paragraphs(
+            doc,
+            selected_artifacts,
+            style="pc",
+            preferred_platforms=["Computer", "macOS", "Chromebook", "Cloud", "Refined Results"],
+            sources=getattr(self, "selected_artifact_sources", {}),
+        )
 
     def validate_fields(self):
         missing_fields = []
@@ -2447,8 +1771,11 @@ class PCFullExam(TkinterDnD.Tk):
                 "Case Type": self.offense_type.get(),  # Case Agent uses offense_type
             }
             
-            if self.legal_self.get() == 'Search Warrant' and not self.sw_service_date.get().strip():
-                missing_fields.append("Search Warrant Service Date")
+            if not self.sw_service_date.get().strip():
+                if self.legal_self.get() == 'Search Warrant':
+                    missing_fields.append("Search Warrant Service Date")
+                else:
+                    missing_fields.append("Date of Possession")
             
             # Check time frame fields for Case Agent
             if (self.legal_self.get() == 'Search Warrant' and 
@@ -2655,7 +1982,11 @@ class PCFullExam(TkinterDnD.Tk):
             print("\nHandling split placeholders...")
             
             # Look for placeholders that might be split by XML tags
-            target_placeholders = ['PY_DFR', 'PY_OWNER', 'PY_EXAMINER', 'PY_CASENUMBER', 'PY_EVIDENCE', 'PY_REQOFF', 'PY_PCSERIAL', 'PY_DEVMAKE', 'PY_TX1VER', 'PY_XWVER', 'PY_DCVER'
+            target_placeholders = [
+                'PY_DFR', 'PY_OWNER', 'PY_EXAMINER', 'PY_CASENUMBER', 'PY_EVIDENCE',
+                'PY_REQOFF', 'PY_PCSERIAL', 'PY_DEVMAKE', 'PY_DEVMODEL', 'PY_PCMAN',
+                'PY_PCMOD', 'PY_CAPACITY', 'PY_HDMAKE', 'PY_HDMODEL', 'PY_HDSERIAL',
+                'PY_TX1VER', 'PY_XWVER', 'PY_DCVER', 'PY_FTKVER',
             ]
             
             for search_string in target_placeholders:
@@ -2737,7 +2068,7 @@ class PCFullExam(TkinterDnD.Tk):
             
             if self.role_type.get() == "Agency Assist":
                 request_date = self.parse_request_date(self.request_date.get())
-            elif self.role_type.get() == "Case Agent" and self.legal_self.get() == 'Search Warrant':
+            elif self.role_type.get() == "Case Agent":
                 request_date = self.parse_request_date(self.sw_service_date.get())
             else:
                 request_date = ""
@@ -2773,8 +2104,8 @@ class PCFullExam(TkinterDnD.Tk):
                 'Request_Date': request_date,
                 'Request_Agency': request_agency_formatted,
                 'Request_Agency_Abbr': request_agency_abbr,
-                'Request_Title': self.format_title(self.get_request_title()) if self.role_type.get() == "Agency Assist" else "",
-                'Request_Officer': self.request_officer.get().title() if self.role_type.get() == "Agency Assist" else "",
+                'Request_Title': self.format_title(self.get_request_title()) if self.role_type.get() == "Agency Assist" else self.format_title(examiner_title_value),
+                'Request_Officer': self.request_officer.get().title() if self.role_type.get() == "Agency Assist" else officer_name.title(),
                 'Request_Officer_LastName': officer_last_name.title() if officer_last_name else '',
                 'Request_Case': case_type,
                 'Device_Owner': self.device_owner.get().title(),
@@ -2854,16 +2185,21 @@ class PCFullExam(TkinterDnD.Tk):
             data = merge_log_device_into_report_data(data, extraction_data, device_type)
                     
             # Set article based on device type
+            data = apply_preview_overrides_to_data(self, data)
             data['article'] = 'an' if device_type.lower().startswith(('a','e','i','o','u')) else 'a'
             if preview_only:
+                set_extracted_preview(self, extraction_data, "pc")
                 model = data.get("device_PCMod") or data.get("hd_model") or ""
                 suggested = apply_suggested_filename(self, "PC", model)
                 show_placeholder_preview(
                     self,
-                    pc_preview_rows(
-                        data,
-                        officer_text=self.format_case_officer(data) if hasattr(self, "format_case_officer") else data.get("Request_Officer", ""),
-                        image_date=data.get("formatted_date", ""),
+                    apply_overrides_to_preview_rows(
+                        self,
+                        pc_preview_rows(
+                            data,
+                            officer_text=self.format_case_officer(data) if hasattr(self, "format_case_officer") else data.get("Request_Officer", ""),
+                            image_date=data.get("formatted_date", ""),
+                        ),
                     ),
                     suggested,
                 )
@@ -2930,6 +2266,8 @@ class PCFullExam(TkinterDnD.Tk):
 
                 "PY_DEVMAKE": Document(),
                 "PY_DEVMODEL": Document(),
+                "PY_PCMAN": Document(),
+                "PY_PCMOD": Document(),
                 "PY_PCSERIAL": Document(),
                 "PY_COLOR": Document(),
                 "PY_PASSCODE": Document(),
@@ -2993,6 +2331,7 @@ class PCFullExam(TkinterDnD.Tk):
 
             # Reset selected artifacts after generating report
             self.selected_artifacts = []
+            self.selected_artifact_sources = {}
             
         except Exception as e:
             import traceback
@@ -3167,7 +2506,9 @@ class PCFullExam(TkinterDnD.Tk):
             "PY_HDMAKE": data.get('hd_make', ''),
             "PY_HDMODEL": data.get('hd_model', ''),
             "PY_HDSERIAL": data.get('hd_serial', ''),
-            "PY_CAPACITY": data.get('Device_Capacity', ''),
+            "PY_CAPACITY": data.get('Device_Capacity') or data.get('device_capacity', ''),
+            "PY_PCMAN": data.get('device_PCMan', ''),
+            "PY_PCMOD": data.get('device_PCMod', ''),
             
             "PY_FTKVER": data.get('FTK_OS', ''),
             "PY_TX1VER": data.get('TX1_OS', ''),
@@ -3190,6 +2531,7 @@ class PCFullExam(TkinterDnD.Tk):
                 "PY_HDSERIAL": data.get('hd_serial', ''),
             })
         
+        overlay_preview_overrides(self, replacement_map)
         print("\nGenerating replacement content:")
         
         # Create content for each search string
@@ -3672,4 +3014,4 @@ class PCFullExam(TkinterDnD.Tk):
         close_and_return(self)
 
 
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.1) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.0.3) © 2026 #

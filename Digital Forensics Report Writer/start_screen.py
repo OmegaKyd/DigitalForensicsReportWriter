@@ -4,6 +4,7 @@ sys.dont_write_bytecode = True
 import tkinter as tk
 from tkinter import ttk, messagebox
 import ctypes
+from tkinterdnd2 import TkinterDnD
 
 from mobile_portable_case import MobilePortableCase
 from mobile_full_exam import MobileFullExam
@@ -21,7 +22,7 @@ def _hide_console():
         pass
 
 
-class StartScreen(tk.Tk):
+class StartScreen(TkinterDnD.Tk):
     def __init__(self):
         super().__init__()
 
@@ -151,4 +152,4 @@ if __name__ == "__main__":
             print(f"An unexpected error occurred: {e}")
         sys.exit(1)
 
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.1) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.0.3) © 2026 #

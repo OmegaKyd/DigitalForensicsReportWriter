@@ -4,15 +4,18 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from paragraphs_manager import (
+    PROCESS_GROUPS,
     REPORT_TYPES,
     TOKEN_HELP,
     default_paragraphs,
     fill_paragraph,
     is_modified,
+    kinds_for_process,
     load_paragraphs,
     paragraph_label,
     paragraph_when,
     paragraphs_file,
+    process_for_kind,
     refresh_open_report_windows,
     revert_all,
     revert_paragraph,
@@ -34,7 +37,9 @@ def open_paragraph_editor(parent):
     win.minsize(900, 560)
     win.transient(parent)
 
-    current_kind = tk.StringVar(value=REPORT_TYPES[0][0])
+    start_kind = getattr(parent, "_paragraph_kind", None) or REPORT_TYPES[0][0]
+    current_kind = tk.StringVar(value=start_kind)
+    current_process = tk.StringVar(value=process_for_kind(start_kind))
     current_key = {"value": None}
     loaded_text = {"value": ""}
     loading = {"value": False}
@@ -42,9 +47,9 @@ def open_paragraph_editor(parent):
 
     ttk.Label(
         win,
-        text="Edit the canned narrative for each report type. Field tokens such as {Request_Date} "
-        "are filled from the form when a report is generated. PY_ tokens belong in Word templates, "
-        "not here (Help → Template Placeholders).",
+        text="Choose a process to show only that family's paragraphs and field tokens. "
+        "Tokens such as {Request_Date} are filled from the form when a report is generated. "
+        "PY_ tokens belong in Word templates, not here (Help → Template Placeholders).",
         wraplength=1060,
         style="Hint.TLabel",
     ).pack(anchor="w", padx=12, pady=(10, 4))
@@ -56,10 +61,22 @@ def open_paragraph_editor(parent):
 
     left = ttk.Frame(body)
     left.grid(row=0, column=0, sticky="nsw", padx=(0, 8))
+    ttk.Label(left, text="Process").pack(anchor="w")
+    process_combo = ttk.Combobox(
+        left,
+        state="readonly",
+        values=[label for _pid, label, _kinds in PROCESS_GROUPS],
+        width=26,
+    )
+    process_combo.pack(fill="x", pady=(4, 10))
+    process_labels = {label: pid for pid, label, _kinds in PROCESS_GROUPS}
+    process_ids = {pid: label for pid, label, _kinds in PROCESS_GROUPS}
+    process_combo.set(process_ids.get(current_process.get(), PROCESS_GROUPS[0][1]))
+
     ttk.Label(left, text="Report type").pack(anchor="w")
     type_list = tk.Listbox(
         left,
-        height=8,
+        height=4,
         width=28,
         exportselection=False,
         bg=COLORS["entry_bg"],
@@ -67,10 +84,8 @@ def open_paragraph_editor(parent):
         selectbackground=COLORS["accent_dark"],
         highlightthickness=0,
     )
-    type_list.pack(fill="y", pady=(4, 10))
-    for _kind, label in REPORT_TYPES:
-        type_list.insert("end", label)
-    type_list.selection_set(0)
+    type_list.pack(fill="x", pady=(4, 10))
+    visible_types = {"items": []}
 
     ttk.Label(left, text="Paragraph").pack(anchor="w")
     para_frame = ttk.Frame(left)
@@ -168,9 +183,29 @@ def open_paragraph_editor(parent):
 
     def selected_kind():
         selection = type_list.curselection()
-        if not selection:
-            return REPORT_TYPES[0][0]
-        return REPORT_TYPES[selection[0]][0]
+        items = visible_types["items"]
+        if not selection or not items:
+            if items:
+                return items[0][0]
+            return current_kind.get() or REPORT_TYPES[0][0]
+        index = selection[0]
+        if 0 <= index < len(items):
+            return items[index][0]
+        return items[0][0]
+
+    def fill_type_list(process_id, prefer_kind=None):
+        items = kinds_for_process(process_id)
+        visible_types["items"] = items
+        type_list.delete(0, "end")
+        pick = 0
+        for index, (kind, label) in enumerate(items):
+            type_list.insert("end", label)
+            if prefer_kind and kind == prefer_kind:
+                pick = index
+        if items:
+            type_list.selection_clear(0, "end")
+            type_list.selection_set(pick)
+            type_list.see(pick)
 
     def selected_key():
         selection = para_list.curselection()
@@ -305,15 +340,31 @@ def open_paragraph_editor(parent):
             status_label.configure(text=f"Saved. Stored in {paragraphs_file()}")
         return True
 
+    def on_process_change(_event=None):
+        if refreshing["value"] or loading["value"]:
+            return
+        label = process_combo.get()
+        process_id = process_labels.get(label, PROCESS_GROUPS[0][0])
+        if process_id == current_process.get() and visible_types["items"]:
+            return
+        if not confirm_leave():
+            process_combo.set(process_ids.get(current_process.get(), PROCESS_GROUPS[0][1]))
+            return
+        current_process.set(process_id)
+        fill_type_list(process_id)
+        kind = selected_kind()
+        fill_tokens(kind)
+        fill_paragraph_list(kind)
+        show_current()
+
     def on_type_change(_event=None):
         if refreshing["value"] or loading["value"]:
             return
         if selected_kind() == current_kind.get():
             return
         if not confirm_leave():
-            # restore previous type selection
             wanted = current_kind.get()
-            for index, (kind, _label) in enumerate(REPORT_TYPES):
+            for index, (kind, _label) in enumerate(visible_types["items"]):
                 if kind == wanted:
                     type_list.selection_clear(0, "end")
                     type_list.selection_set(index)
@@ -409,6 +460,7 @@ def open_paragraph_editor(parent):
     editor.bind("<<Modified>>", lambda e: (editor.edit_modified(False), schedule_highlight()))
     editor.bind("<KeyRelease>", schedule_highlight)
     editor.bind("<<Paste>>", schedule_highlight)
+    process_combo.bind("<<ComboboxSelected>>", on_process_change)
     type_list.bind("<<ListboxSelect>>", on_type_change)
     para_list.bind("<<ListboxSelect>>", on_para_change)
     token_list.bind("<<ListboxSelect>>", show_token_help)
@@ -423,6 +475,7 @@ def open_paragraph_editor(parent):
     ttk.Button(buttons, text="Revert All to Defaults", command=do_revert_all).pack(side="left", padx=4)
     ttk.Button(buttons, text="Close", command=on_close).pack(side="right", padx=4)
 
+    fill_type_list(current_process.get(), prefer_kind=current_kind.get())
     fill_tokens(selected_kind())
     fill_paragraph_list(selected_kind())
     show_current()

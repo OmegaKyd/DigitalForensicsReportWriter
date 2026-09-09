@@ -23,6 +23,26 @@ REPORT_TYPES = [
     ("warrant", "Warrant Data Returns"),
 ]
 
+PROCESS_GROUPS = [
+    ("mobile", "Mobile", ("mobile_full", "mobile_portable")),
+    ("computer", "Computer", ("pc_full", "pc_portable")),
+    ("warrant", "Warrant / SW", ("warrant",)),
+]
+
+
+def process_for_kind(kind):
+    for process_id, _label, kinds in PROCESS_GROUPS:
+        if kind in kinds:
+            return process_id
+    return PROCESS_GROUPS[0][0]
+
+
+def kinds_for_process(process_id):
+    for group_id, _label, kinds in PROCESS_GROUPS:
+        if group_id == process_id:
+            return [(kind, label) for kind, label in REPORT_TYPES if kind in kinds]
+    return list(REPORT_TYPES)
+
 # Shown in the editor list. Keys that are omitted fall back to the raw key name.
 PARAGRAPH_META = {
     "mobile_full": {
@@ -141,8 +161,44 @@ PARAGRAPH_META = {
     },
     "warrant": {
         "intro_self": (
-            "Warrant service and return",
-            "Opening narrative for the warrant-return report. Field names on this report match the template tokens.",
+            "Unused leftover opening",
+            "Kept for older saved paragraph files. Current reports use one_aa / one_ca instead.",
+        ),
+        "one_ca": (
+            "Case Agent — warrant service",
+            "Case Agent and the warrant time frame is not limited.",
+        ),
+        "one_ca_limited": (
+            "Case Agent — warrant service + time frame",
+            "Case Agent and Time Limit Limited is checked.",
+        ),
+        "two_ca": (
+            "Case Agent — data return",
+            "Always included for Case Agent.",
+        ),
+        "one_aa": (
+            "Agency Assist — request",
+            "Agency Assist opening. Uses Request Date, not the warrant time frame.",
+        ),
+        "two_aa": (
+            "Agency Assist — data provided",
+            "Always included for Agency Assist.",
+        ),
+        "three_ca": (
+            "Forensic processing",
+            "Used when Cellebrite, AXIOM, or Griffeye is checked.",
+        ),
+        "three_b": (
+            "Manual review only",
+            "Used when Manual Exam Only is checked.",
+        ),
+        "four_ca": (
+            "One Digital Report",
+            "Used when forensic software is checked and one Digital Report tool is chosen.",
+        ),
+        "four_ca_multi": (
+            "Multiple Digital Reports",
+            "Used when more than one tool produced a Digital Report.",
         ),
     },
 }
@@ -160,6 +216,9 @@ TOKEN_HELP = {
     "Examiner_Name": "Examiner name",
     "Examiner_Agency": "Examiner agency full name",
     "Examiner_Agency_Abbr": "Examiner agency abbreviation",
+    "Forensic_Software": "Selected processing software name(s)",
+    "Report_Software": "Software used for the Digital Report",
+    "Report_Article": "a / an chosen from the Digital Report software name",
     "SW_Date": "Search warrant service date (Case Agent)",
     "Transfer_Date": "Date custody was transferred",
     "Transfer_Title": "Transferring officer title",
@@ -191,11 +250,20 @@ TOKEN_HELP = {
     "PY_DATASIZE": "Returned data size",
     "PY_LIMITSTART": "Time-frame start (if limited)",
     "PY_LIMITEND": "Time-frame end (if limited)",
-    "PY_DFR": "DFR / WDR number",
+    "PY_DFR": "DFR number",
     "PY_CASENUMBER": "Agency or lab case number",
     "PY_EXAMINER": "Examiner title and name",
     "PY_REQAGENCY": "Requesting agency",
     "PY_REQOFF": "Requesting officer title and name",
+    "Account_Owner": "Account owner from Account Information",
+    "Account_Identifier": "Account identifier / username / number",
+    "Service_Provider": "Service provider",
+    "Data_Size": "Returned data size in GB",
+    "Warrant_Service_Date": "Warrant service date",
+    "Data_Return_Date": "Data return date",
+    "Time_Frame_Start": "Time-frame start (if limited)",
+    "Time_Frame_End": "Time-frame end (if limited)",
+    "Role_Type": "Agency Assist or Case Agent",
 }
 
 _TOKEN_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
@@ -227,7 +295,32 @@ def tokens_for_report(kind):
             if token not in seen:
                 seen.append(token)
     extra = {
-        "warrant": ["PY_LIMITSTART", "PY_LIMITEND", "PY_DFR", "PY_CASENUMBER", "PY_EXAMINER", "PY_REQAGENCY", "PY_REQOFF"],
+        "warrant": [
+            "Warrant_Service_Date",
+            "Data_Return_Date",
+            "Service_Provider",
+            "Account_Owner",
+            "Account_Identifier",
+            "Data_Size",
+            "DFR_Num",
+            "Case_Number",
+            "Examiner_Title",
+            "Examiner_Name",
+            "Request_Agency",
+            "Request_Title",
+            "Request_Officer",
+            "Time_Frame_Start",
+            "Time_Frame_End",
+            "Role_Type",
+            "Request_Case",
+            "Request_Date",
+            "Request_Agency_Abbr",
+            "Examiner_Agency",
+            "Examiner_Agency_Abbr",
+            "Forensic_Software",
+            "Report_Software",
+            "Report_Article",
+        ],
     }
     for token in extra.get(kind, []):
         if token not in seen:

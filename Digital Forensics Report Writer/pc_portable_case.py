@@ -13,7 +13,7 @@ from tkinter.scrolledtext import ScrolledText
 from tkinterdnd2 import DND_FILES, TkinterDnD
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from settings_manager import SettingsManager
-from ui_theme import apply_theme, add_header_bar, add_action_bar, pack_right_actions, size_window, build_extracted_info_pane, parse_mdy_date, add_date_entry, COLORS, FormTabs, close_and_return
+from ui_theme import apply_theme, add_header_bar, add_action_bar, pack_right_actions, size_window, build_extracted_info_pane, parse_mdy_date, add_date_entry, COLORS, FormTabs, close_and_return, DndToplevel
 from app_menu import attach_app_menu
 from paragraphs_manager import fill_paragraph, load_paragraphs
 from report_common import (
@@ -25,9 +25,14 @@ from report_common import (
     unique_output_path,
     apply_suggested_filename,
     show_placeholder_preview,
+    set_extracted_preview,
+    apply_overrides_to_preview_rows,
+    apply_preview_overrides_to_data,
+    overlay_preview_overrides,
     pc_preview_rows,
     looks_like_digital_collector_log,
     parse_digital_collector_log,
+    apply_parsed_capacity,
     apply_log_device_fields_to_form,
     merge_log_device_into_report_data,
     load_request_titles,
@@ -50,9 +55,16 @@ from lxml import etree
 
 #ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
 
-class PCPortableCase(TkinterDnD.Tk):
+class PCPortableCase(DndToplevel):
     def __init__(self, master=None):
-        super().__init__()
+        if master is None:
+            master = TkinterDnD.Tk()
+            master.withdraw()
+            owns_root = True
+        else:
+            owns_root = False
+        super().__init__(master)
+        self._owns_hidden_root = owns_root
 
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.master = master
@@ -462,7 +474,7 @@ class PCPortableCase(TkinterDnD.Tk):
                 "examiner_title": examiner_title_value,
                 "examiner_name": self.examiner_name.get(),
                 "dfr_number_prefix": self.get_dfr_prefix(),
-                "version": "1.0.1"
+                "version": "1.0.3"
             }
             
             self.settings_manager.save_settings(settings_to_save)
@@ -806,6 +818,8 @@ class PCPortableCase(TkinterDnD.Tk):
                     ('case_number', 'Case Number'),
                     ('case_id', 'Case ID'),
                     ('device_model', 'Source Device Model'),
+                    ('device_serial', 'Source Device Serial'),
+                    ('device_capacity', 'Capacity'),
                     ('case_notes', 'Case Notes'),
                     ('md5_hash', 'MD5 Hash'),
                 ]
@@ -816,6 +830,8 @@ class PCPortableCase(TkinterDnD.Tk):
                     ('case_number', 'Case Number'),
                     ('evidence_number', 'Evidence Number'),
                     ('device_model', 'Source Device Model'),
+                    ('device_serial', 'Source Device Serial'),
+                    ('device_capacity', 'Capacity'),
                     ('case_notes', 'Description'),
                     ('md5_hash', 'MD5 Hash'),
                 ]
@@ -824,6 +840,8 @@ class PCPortableCase(TkinterDnD.Tk):
                     ('formatted_date', 'Extraction Date/Time'),
                     ('xways_OS', 'X-Ways Version'),
                     ('device_model', 'Source Device Model'),
+                    ('device_serial', 'Source Device Serial'),
+                    ('device_capacity', 'Capacity'),
                     ('case_notes', 'Internal Description'),
                     ('md5_hash', 'MD5 Hash'),
                 ]
@@ -912,11 +930,6 @@ class PCPortableCase(TkinterDnD.Tk):
         if hasattr(self, 'case_agent_time_frame_end'):
             self.case_agent_time_frame_end.delete(0, tk.END)
         
-        # Hide search warrant date fields when switching roles
-        if hasattr(self, 'sw_date_frame'):
-            for widget in self.sw_date_frame.winfo_children():
-                widget.grid_remove()
-        
         # Portable case is Agency Assist only. Guard leftover Case Agent UI hooks.
         if not hasattr(self, "role_type") or self.role_type is None:
             if hasattr(self, "toggle_time_frame_section"):
@@ -1000,6 +1013,7 @@ class PCPortableCase(TkinterDnD.Tk):
             extraction_data = self.parse_log_file()
             apply_log_device_fields_to_form(self, extraction_data)
             self.update_info_display(data=extraction_data)
+            apply_suggested_filename(self, "PCPortable", (extraction_data or {}).get("device_model", ""))
             
             # No popup messages - the file type will be shown in the display window header
         else:
@@ -1181,7 +1195,7 @@ class PCPortableCase(TkinterDnD.Tk):
         if 'formatted_date' not in extraction_data:
             extraction_data['formatted_date'] = "Unknown Date"
             self.log_populated_fields.add('formatted_date')
-        
+        apply_parsed_capacity(extraction_data, content, self.log_populated_fields)
         return extraction_data
     
     def parse_xways_date(self, date_str):
@@ -1315,7 +1329,7 @@ class PCPortableCase(TkinterDnD.Tk):
             extraction_data['formatted_date'] = extraction_data['extraction_date']
         else:
             extraction_data['formatted_date'] = "Unknown Date"
-                
+        apply_parsed_capacity(extraction_data, content, self.log_populated_fields)
         return extraction_data
     
     def parse_ftk_log(self, content):
@@ -1387,7 +1401,7 @@ class PCPortableCase(TkinterDnD.Tk):
         if 'formatted_date' not in extraction_data:
             extraction_data['formatted_date'] = "Unknown Date"
             self.log_populated_fields.add('formatted_date')
-
+        apply_parsed_capacity(extraction_data, content, self.log_populated_fields)
         return extraction_data
    
     def parse_tx1_date(self, date_str):
@@ -1710,7 +1724,11 @@ class PCPortableCase(TkinterDnD.Tk):
             print("\nHandling split placeholders...")
             
             # Look for placeholders that might be split by XML tags
-            target_placeholders = ['PY_DFR', 'PY_OWNER', 'PY_EXAMINER', 'PY_CASENUMBER', 'PY_EVIDENCE', 'PY_REQOFF', 'PY_PCSERIAL', 'PY_DEVMAKE', 'PY_TX1VER', 'PY_XWVER', 'PY_DCVER'
+            target_placeholders = [
+                'PY_DFR', 'PY_OWNER', 'PY_EXAMINER', 'PY_CASENUMBER', 'PY_EVIDENCE',
+                'PY_REQOFF', 'PY_PCSERIAL', 'PY_DEVMAKE', 'PY_DEVMODEL', 'PY_PCMAN',
+                'PY_PCMOD', 'PY_CAPACITY', 'PY_HDMAKE', 'PY_HDMODEL', 'PY_HDSERIAL',
+                'PY_TX1VER', 'PY_XWVER', 'PY_DCVER', 'PY_FTKVER',
             ]
             
             for search_string in target_placeholders:
@@ -1881,16 +1899,21 @@ class PCPortableCase(TkinterDnD.Tk):
                     data[field] = extraction_data[field]
             data = merge_log_device_into_report_data(data, extraction_data, device_type)
                         
+            data = apply_preview_overrides_to_data(self, data)
             data['article'] = 'an' if device_type.lower().startswith(('a','e','i','o','u')) else 'a'
             if preview_only:
+                set_extracted_preview(self, extraction_data, "pc")
                 model = data.get("device_PCMod") or data.get("hd_model") or ""
                 suggested = apply_suggested_filename(self, "PCPortable", model)
                 show_placeholder_preview(
                     self,
-                    pc_preview_rows(
-                        data,
-                        officer_text=self.format_case_officer(data) if hasattr(self, "format_case_officer") else data.get("Request_Officer", ""),
-                        image_date=data.get("formatted_date", ""),
+                    apply_overrides_to_preview_rows(
+                        self,
+                        pc_preview_rows(
+                            data,
+                            officer_text=self.format_case_officer(data) if hasattr(self, "format_case_officer") else data.get("Request_Officer", ""),
+                            image_date=data.get("formatted_date", ""),
+                        ),
                     ),
                     suggested,
                 )
@@ -1945,6 +1968,8 @@ class PCPortableCase(TkinterDnD.Tk):
                 "PY_IMAGEDATE": Document(),
                 "PY_DEVMAKE": Document(),
                 "PY_DEVMODEL": Document(),
+                "PY_PCMAN": Document(),
+                "PY_PCMOD": Document(),
                 "PY_PCSERIAL": Document(),
                 "PY_COLOR": Document(),
                 "PY_PASSCODE": Document(),
@@ -2136,7 +2161,9 @@ class PCPortableCase(TkinterDnD.Tk):
             "PY_HDMAKE": data.get('hd_make', ''),
             "PY_HDMODEL": data.get('hd_model', ''),
             "PY_HDSERIAL": data.get('hd_serial', ''),
-            "PY_CAPACITY": data.get('Device_Capacity', ''),
+            "PY_CAPACITY": data.get('Device_Capacity') or data.get('device_capacity', ''),
+            "PY_PCMAN": data.get('device_PCMan', ''),
+            "PY_PCMOD": data.get('device_PCMod', ''),
             "PY_FTKVER": data.get('FTK_OS', ''),
             "PY_TX1VER": data.get('TX1_OS', ''),
             "PY_XWVER": data.get('xways_OS', ''),
@@ -2156,6 +2183,7 @@ class PCPortableCase(TkinterDnD.Tk):
                 "PY_HDSERIAL": data.get('hd_serial', ''),
             })
         
+        overlay_preview_overrides(self, replacement_map)
         print("\nGenerating replacement content:")
         
         for search_string, doc in search_docs.items():
@@ -2492,4 +2520,4 @@ class PCPortableCase(TkinterDnD.Tk):
         close_and_return(self)
 
 
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.1) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.0.3) © 2026 #

@@ -27,7 +27,6 @@ class SettingsManager:
             "examiner_title": "",
             "examiner_name": "",
             "dfr_number_prefix": "DFR2026-",
-            "warrant_report_prefix": "WDR2026-",
             "default_service_provider": "",
             "last_template_dir": "",
             "last_extraction_dir": "",
@@ -35,7 +34,7 @@ class SettingsManager:
             "dfr_templates_dir": "",
             "remembered_request_titles": [],
             "remembered_request_agencies": [],
-            "version": "1.0.1",
+            "version": "1.0.3",
         }
 
     def _appdata_dir(self, app_name=None, create=True):
@@ -92,4 +91,4 @@ class SettingsManager:
     def get_settings_file_path(self):
         return str(self.settings_file)
 
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.1) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.0.3) © 2026 #

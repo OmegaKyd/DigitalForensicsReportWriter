@@ -16,7 +16,7 @@ from settings_manager import SettingsManager
 from docx.oxml.ns import qn
 from docx.oxml import parse_xml
 from lxml import etree
-from ui_theme import apply_theme, add_header_bar, add_action_bar, pack_right_actions, size_window, build_extracted_info_pane, parse_mdy_date, add_date_entry, COLORS, FormTabs, close_and_return
+from ui_theme import apply_theme, add_header_bar, add_action_bar, pack_right_actions, size_window, build_extracted_info_pane, parse_mdy_date, add_date_entry, COLORS, FormTabs, close_and_return, DndToplevel
 from app_menu import attach_app_menu
 from paragraphs_manager import fill_paragraph, load_paragraphs
 from cellebrite_pdf import process_pdf_selection, parse_cellebrite_pdfs_only
@@ -31,6 +31,10 @@ from report_common import (
     apply_suggested_filename,
     seed_save_location,
     show_placeholder_preview,
+    set_extracted_preview,
+    apply_overrides_to_preview_rows,
+    apply_preview_overrides_to_data,
+    overlay_preview_overrides,
     mobile_preview_rows,
     require_device_identity,
     current_dfr_prefix,
@@ -50,9 +54,16 @@ from report_common import (
 
 #ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
 
-class MobileFullExam(TkinterDnD.Tk):
+class MobileFullExam(DndToplevel):
     def __init__(self, master=None):
-        super().__init__()
+        if master is None:
+            master = TkinterDnD.Tk()
+            master.withdraw()
+            owns_root = True
+        else:
+            owns_root = False
+        super().__init__(master)
+        self._owns_hidden_root = owns_root
         
         self.role_type = None  # Initialize to avoid AttributeError
 
@@ -336,7 +347,8 @@ class MobileFullExam(TkinterDnD.Tk):
         self.sw_date_frame = ttk.Frame(self.case_agent_frame)
         self.sw_date_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=2)
 
-        ttk.Label(self.sw_date_frame, text="Search Warrant Service Date:").grid(row=0, column=0, sticky="w", pady=2)
+        self.sw_date_label = ttk.Label(self.sw_date_frame, text="Search Warrant Service Date:")
+        self.sw_date_label.grid(row=0, column=0, sticky="w", pady=2)
         self.sw_service_date = add_date_entry(self.sw_date_frame, row=0, column=1)
 
         # Time Frame Section (only for Search Warrant)
@@ -659,7 +671,7 @@ class MobileFullExam(TkinterDnD.Tk):
                 "examiner_title": examiner_title_value,
                 "examiner_name": self.examiner_name.get(),
                 "dfr_number_prefix": self.get_dfr_prefix(),
-                "version": "1.0.1"
+                "version": "1.0.3"
             }
             
             self.settings_manager.save_settings(settings_to_save)
@@ -749,6 +761,7 @@ class MobileFullExam(TkinterDnD.Tk):
         self.artifacts_button_frame.grid(row=1, column=0, columnspan=2, sticky="w", pady=5)
 
         self.selected_artifacts = []
+        self.selected_artifact_sources = {}
         self.select_artifacts_button = ttk.Button(
             self.artifacts_button_frame, 
             text="Select Artifacts", 
@@ -768,6 +781,7 @@ class MobileFullExam(TkinterDnD.Tk):
             self.select_artifacts_button.pack_forget()
             # Clear selected artifacts when Axiom is unchecked
             self.selected_artifacts = []
+            self.selected_artifact_sources = {}
         self.refresh_tab_status()
             
     def get_selected_forensic_software(self):
@@ -798,6 +812,7 @@ class MobileFullExam(TkinterDnD.Tk):
         if hasattr(self, 'extraction_file') and self.extraction_file:
             extraction_data = self.parse_extraction_file()
             device_type = self.determine_device_type(extraction_data)
+            self._artifact_device_type = device_type
             self.selected_artifacts = self.select_artifacts_popup(device_type)
             if self.selected_artifacts:
                 messagebox.showinfo("Artifacts Selected", f"{len(self.selected_artifacts)} artifacts selected successfully.")
@@ -899,11 +914,6 @@ class MobileFullExam(TkinterDnD.Tk):
         if hasattr(self, 'case_time_frame_end_date'):
             self.case_time_frame_end_date.delete(0, tk.END)
         
-        # Hide search warrant date fields when switching roles
-        if hasattr(self, 'sw_date_frame'):
-            for widget in self.sw_date_frame.winfo_children():
-                widget.grid_remove()
-        
         # Hide time frame sections
         if hasattr(self, 'time_frame_dates_frame'):
             self.time_frame_dates_frame.grid_remove()
@@ -926,18 +936,17 @@ class MobileFullExam(TkinterDnD.Tk):
             self.toggle_case_time_frame_section()
 
     def toggle_sw_date(self, event=None):
-        if hasattr(self, 'legal_self') and self.legal_self.get() == 'Search Warrant':
-            # Show the SW date frame
-            if hasattr(self, 'sw_date_frame'):
-                self.sw_date_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=2)
-        else:
-            # Hide the SW date frame and clear its value
-            if hasattr(self, 'sw_date_frame'):
-                self.sw_date_frame.grid_remove()
-                
-                # Clear the SW service date field when hiding it
-                if hasattr(self, 'sw_service_date'):
-                    self.sw_service_date.delete(0, tk.END)
+        if not hasattr(self, 'sw_date_frame'):
+            return
+        self.sw_date_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=2)
+        warrant = hasattr(self, 'legal_self') and self.legal_self.get() == 'Search Warrant'
+        if hasattr(self, 'sw_date_label'):
+            self.sw_date_label.configure(
+                text="Search Warrant Service Date:" if warrant else "Date of Possession:"
+            )
+            self.sw_date_label.grid(row=0, column=0, sticky="w", pady=2)
+        if hasattr(self, 'sw_service_date') and getattr(self.sw_service_date, "master", None) is not None:
+            self.sw_service_date.master.grid(row=0, column=1, sticky="ew", pady=2)
 
     def toggle_title_entry(self, event=None):
         if self.request_title_type.get() == "Other (specify)":
@@ -1616,541 +1625,22 @@ class MobileFullExam(TkinterDnD.Tk):
             return "Android"
 
     def select_artifacts_popup(self, device_type):
-        artifacts = []
-        previously_selected = self.selected_artifacts if hasattr(self, 'selected_artifacts') else []
-        
-        # Determine which artifact list to show based on device type
-        if device_type == "iOS":
-            # Define Left Column iOS Artifacts
-            left_artifacts = [
-                "iOS Device Information",
-                "Owner Information",
-                "Apple Accounts",
-                "Google Accounts",
-                "SIM Card Activity",
-                "Chrome Downloads",
-                "Chrome Keyword Search Terms",
-                "Chrome Web History",
-                "Chrome Web Visits",
-                "Apple Maps Trips",
-                "Cached Locations",
-                "Significant Locations",
-            ]
-            
-            # Define Right Column iOS Artifacts
-            right_artifacts = [
-                "Apple Notes",
-                "Apple Notes - Voice",
-                "Live Photos",
-                "Pictures",
-                "Videos"
-            ]
-        else:  # Android
-            # Define Left Column Android Artifacts
-            left_artifacts = [
-                "Android Device Information",
-                "Google Accounts",
-                "Accounts Information",
-                "Android Downloads",
-                "Chrome Downloads",
-                "Chrome Keyword Search Terms",
-                "Chrome Web History",
-                "Chrome Web Visits",
-                "Google Maps Search History",
-            ]
-            
-            # Define Right Column Android Artifacts
-            right_artifacts = [
-                "Samsung Notes",
-                "Pictures",
-                "Videos"
-            ]
-        
-        # Create artifact selection dialog
-        selection_window = tk.Toplevel(self)
-        selection_window.title(f"Select {device_type} Artifacts to Include")
-        
-        # Calculate screen dimensions and window position
-        screen_width = self.winfo_screenwidth()
-        screen_height = self.winfo_screenheight()
-        
-        # Set width and height for the popup window
-        popup_width = 500
-        popup_height = 500
-        
-        # Calculate position to center the window
-        x_position = (screen_width - popup_width) // 2
-        y_position = (screen_height - popup_height) // 2
-        
-        # Set window geometry: width x height + x_position + y_position
-        selection_window.geometry(f"{popup_width}x{popup_height}+{x_position}+{y_position}")
-        
-        # Make window modal
-        selection_window.transient(self)
-        selection_window.grab_set()
-        
-        # Create main container frame
-        main_frame = ttk.Frame(selection_window)
-        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        # Add instructional text at the top
-        instruction_frame = ttk.Frame(main_frame)
-        instruction_frame.pack(fill="x", pady=10)
+        from magnet_artifacts import pick_artifacts
+        return pick_artifacts(self, device_class="mobile", device_type=device_type)
 
-        instruction_text = ttk.Label(
-            instruction_frame,
-            text="Select from these common artifacts tagged during your examination:",
-            wraplength=400,
-            justify="left",
-            font=("Arial", 10)
-        )
-        instruction_text.pack(anchor="w")
-
-        # Add a separator for visual clarity
-        separator = ttk.Separator(main_frame, orient="horizontal")
-        separator.pack(fill="x", pady=10)
-        
-        # Create a single scrollable frame for both columns
-        canvas_frame = ttk.Frame(main_frame)
-        canvas_frame.pack(fill="both", expand=True)
-        
-        canvas = tk.Canvas(canvas_frame)
-        scrollbar = ttk.Scrollbar(canvas_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
-        
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-        
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        
-        # Pack the canvas and scrollbar
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        
-        # Create a frame inside the scrollable area to hold the two columns
-        columns_container = ttk.Frame(scrollable_frame)
-        columns_container.pack(fill="both", expand=True)
-        
-        # Create left and right column frames
-        left_column = ttk.Frame(columns_container)
-        left_column.grid(row=0, column=0, sticky="n", padx=(0, 30))
-        
-        right_column = ttk.Frame(columns_container)
-        right_column.grid(row=0, column=1, sticky="n", padx=(30, 0))
-        
-        # Configure grid to distribute space evenly
-        columns_container.columnconfigure(0, weight=1)
-        columns_container.columnconfigure(1, weight=1)
-        
-        # Dictionary to store variables and frames
-        artifact_vars = {}
-        checkbox_widgets = {}
-        subtag_frames = {}
-        
-        # Function to create artifact checkboxes in a given column
-        def create_artifact_checkboxes(column_frame, artifact_list):
-            for artifact in artifact_list:
-                # Create a frame for this artifact and its potential subtags
-                artifact_frame = ttk.Frame(column_frame)
-                artifact_frame.pack(anchor="w", fill="x", pady=2)
-                
-                # Create the main checkbox
-                var = tk.IntVar(selection_window)
-                
-                # Set checkbox to checked if previously selected
-                if artifact in previously_selected:
-                    var.set(1)
-                else:
-                    var.set(0)
-                
-                cb = ttk.Checkbutton(
-                    artifact_frame,
-                    text=artifact,
-                    variable=var,
-                    onvalue=1,
-                    offvalue=0
-                )
-                cb.pack(anchor="w", padx=10, pady=2)
-                
-                # Store references
-                artifact_vars[artifact] = var
-                checkbox_widgets[artifact] = cb
-                
-                # For Pictures and Videos, create a subtag frame
-                if artifact in ["Pictures", "Videos"]:
-                    # Create a container for subtags
-                    subtag_container = ttk.Frame(artifact_frame)
-                    subtag_frames[artifact] = subtag_container
-                    
-                    # Add the subtags
-                    subtags = ["Child Pornography", "Child Erotica", "Age Difficult"]
-                    for subtag in subtags:
-                        subtag_name = f"{artifact} -- {subtag}"
-                        subvar = tk.IntVar(selection_window)
-                        
-                        # Set subtag checkbox to checked if previously selected
-                        if subtag_name in previously_selected:
-                            subvar.set(1)
-                        else:
-                            subvar.set(0)
-                        
-                        sub_cb = ttk.Checkbutton(
-                            subtag_container,
-                            text=f"• {subtag}",
-                            variable=subvar,
-                            onvalue=1,
-                            offvalue=0
-                        )
-                        sub_cb.pack(anchor="w", padx=30, pady=2)
-                        
-                        artifact_vars[subtag_name] = subvar
-                    
-                    # Show subtags if parent was previously selected
-                    if artifact in previously_selected:
-                        subtag_container.pack(anchor="w", fill="x")
-                    else:
-                        subtag_container.pack_forget()
-                    
-                    def make_toggle_function(artifact_name, container):
-                        def toggle_func(*args):
-                            if artifact_vars[artifact_name].get() == 1:
-                                container.pack(anchor="w", fill="x")
-                            else:
-                                container.pack_forget()
-                                # Uncheck all subtags when parent is unchecked
-                                for key, var in artifact_vars.items():
-                                    if key.startswith(f"{artifact_name} -- "):
-                                        var.set(0)
-                        return toggle_func
-                    
-                    toggle_func = make_toggle_function(artifact, subtag_container)
-                    var.trace("w", toggle_func)
-        
-        # Create checkboxes in both columns
-        create_artifact_checkboxes(left_column, left_artifacts)
-        create_artifact_checkboxes(right_column, right_artifacts)
-        
-        # Button frame at the bottom
-        button_frame = ttk.Frame(main_frame)
-        button_frame.pack(fill="x", pady=10)
-        
-        # Select All / Deselect All buttons
-        def select_all():
-            for key, var in artifact_vars.items():
-                if not key.startswith("Pictures -- ") and not key.startswith("Videos -- "):
-                    var.set(1)
-            # Make sure to show subtag frames
-            for artifact in ["Pictures", "Videos"]:
-                if artifact in subtag_frames:
-                    subtag_frames[artifact].pack(anchor="w", fill="x")
-        
-        def deselect_all():
-            for key, var in artifact_vars.items():
-                var.set(0)
-            # Hide subtag frames
-            for artifact in ["Pictures", "Videos"]:
-                if artifact in subtag_frames:
-                    subtag_frames[artifact].pack_forget()
-        
-        select_all_button = ttk.Button(button_frame, text="Select All", command=select_all)
-        select_all_button.pack(side="left", padx=5)
-        
-        deselect_all_button = ttk.Button(button_frame, text="Deselect All", command=deselect_all)
-        deselect_all_button.pack(side="left", padx=5)
-        
-        # Done button
-        def on_done():
-            nonlocal artifacts
-            artifacts = []  # Clear the list first
-            
-            for artifact_name, var in artifact_vars.items():
-                # Only add artifacts with checked boxes (value = 1)
-                if var.get() == 1:
-                    artifacts.append(artifact_name)
-            
-            selection_window.destroy()
-        
-        done_button = ttk.Button(button_frame, text="Done", command=on_done)
-        done_button.pack(side="right", padx=5)
-        
-        # Add a function to handle mousewheel scrolling
-        def on_mousewheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        
-        # Bind mousewheel event to the canvas
-        canvas.bind_all("<MouseWheel>", on_mousewheel)
-        
-        # Wait for window to close
-        self.wait_window(selection_window)
-        
-        # Unbind mousewheel event when window is closed
-        try:
-            canvas.unbind_all("<MouseWheel>")
-        except:
-            pass
-        
-        return artifacts
 
     def generate_artifact_paragraphs(self, doc, selected_artifacts):
-        # Map of artifact names to their descriptions and tag names
-        ios_artifacts = {
-            "iOS Device Information": {
-                "description": "iOS Device Information contains information about the physical device, such as model information, the software version, timezone information, and the IMEI.",
-                "tag": "iOS Device Information"
-            },
-            "Owner Information": {
-                "description": "Owner Information contains information about the iOS device and the device owner. Information includes the device name, the phone number associated with the phone, and other details associated with iOS.",
-                "tag": "Owner Information"
-            },
-            "Apple Accounts": {
-                "description": "Apple Accounts contains information about the Apple ID accounts used on the macOS computer. The account details contained can help investigators recover and correlate account information across applications, and provide information on what accounts to review and get more information from.",
-                "tag": "Apple Accounts"
-            },
-            "Google Accounts": {
-                "description": "Google Accounts contains the Google accounts that are currently signed in on any Google application on the device.",
-                "tag": "Google Accounts"
-            },
-            "SIM Card Activity": {
-                "description": "SIM Card Activity contains information about the SIM cards that have been used in an iOS device.",
-                "tag": "SIM Card Activity"
-            },
-            "Chrome Downloads": {
-                "description": "Chrome Downloads contains information about the files that a user downloads from the Internet.",
-                "tag": "Chrome Downloads"
-            },
-            "Chrome Keyword Search Terms": {
-                "description": "Chrome Keyword Search Terms contains information about the keyword search terms that a user enters.",
-                "tag": "Chrome Keyword Search Terms"
-            },
-            "Chrome Web History": {
-                "description": "Chrome Web History contains a history of the websites that the user visits (includes unique visits only).",
-                "tag": "Chrome Web History"
-            },
-            "Chrome Web Visits": {
-                "description": "Chrome Web Visits contains a history of the websites that the user visits (includes all visits).",
-                "tag": "Chrome Web Visits"
-            },
-            "Apple Maps Trips": {
-                "description": "Apple Maps Trips contains trips generated by Apple Maps. Instances of this artifact can be suggested routes as well as trips that the user actually takes.",
-                "tag": "Apple Maps Trips"
-            },
-            "Cached Locations": {
-                "description": "Cached Locations stores a sample of locations that the iOS device has cached. Each instance contains the location, speed, and direction of travel at that particular point in time. The frequency that location samples are cached can vary depending on device usage, where some applications (such as Maps) can result in samples being cached very frequently.",
-                "tag": "Cached Locations"
-            },"Significant Locations": {
-                "description": "Significant Locations contains information about places that are deemed to be significant in some way to the user. These locations can be manually added by the user (such as a home or work address) or are automatically added by Apple. This data is used to help make more personalized predictions.",
-                "tag": "Significant Locations"
-            },"Apple Notes": {
-                "description": "Apple Notes contains information about the notes that a user has created on their Apple device.",
-                "tag": "Apple Notes"
-            },
-            "Apple Notes - Voice": {
-                "description": "Apple Notes Voice contains the recovered voice notes from an iOS device.",
-                "tag": "Apple Notes - Voice"
-            },
-            "Live Photos": {
-                "description": "Live Photos contains Live Photos that were retrieved using parsing. Support exists for all versions of iOS.",
-                "tag": "Live Photos",
-            },
-        }
-        
-        android_artifacts = {
-            "Android Device Information": {
-                "description": "Android Device Information contains the phone identification values.",
-                "tag": "Android Device Information"
-            },
-            "Google Accounts": {
-                "description": "Google Accounts contains the Google accounts that are currently signed in on any Google application on the device.",
-                "tag": "Google Accounts"
-            },
-            "Accounts Information": {
-                "description": "Contains the login information and tokens for accounts on the Android device.",
-                "tag": "Accounts Information"
-            },
-            "Android Downloads": {
-                "description": "Android Downloads contains file download information from a recovered Android device.",
-                "tag": "Android Downloads"
-            },
-            "Chrome Downloads": {
-                "description": "Chrome Downloads contains information about the files that a user downloads from the internet.",
-                "tag": "Chrome Downloads"
-            },
-            "Chrome Keyword Search Terms": {
-                "description": "Chrome Keyword Search Terms contains information about the keyword search terms that a user enters.",
-                "tag": "Chrome Keyword Search Terms"
-            },
-            "Chrome Web History": {
-                "description": "Chrome Web History contains a history of the websites that the user visits (includes unique visits only).",
-                "tag": "Chrome Web History"
-            },
-            "Chrome Web Visits": {
-                "description": "Chrome Web Visits contains a history of the websites that the user visits (includes all visits).",
-                "tag": "Chrome Web Visits"
-            },
-            "Samsung Notes": {
-                "description": "Samsung Notes contains information about the notes that a user has created on their Samsung device.",
-                "tag": "Samsung Notes"
-            },
-            "Google Maps Search History": {
-                "description": "Google Maps Search History contains information about locations that the user may have searched for using Google Maps. This includes searches for businesses, addresses, and points of interest. These searches will synchronize between different devices on Google Maps when signed into the same account.",
-                "tag": "Google Maps Search History"
-            }
-        }
-        
-        # Artifacts for both iOS and Android
-        common_artifacts = {
-            "Pictures": {
-                "description": "Pictures contains pictures that were retrieved using either carving or parsing techniques. The supported picture formats are JPEG (.jpeg, .jpg, .jpe), PNG (.png), Bitmaps (.bmp), Graphics Interchange Format (.gif), Icons (.ico), and Tagged Image File Format (.tif, .tiff).",
-                "tag": "Pictures"
-            },
-            "Pictures -- Child Pornography": {
-                "description": "The image files contained in this tag appear to depict child pornography. Child pornography consists of any visual depiction, including photographs, film, videos, or pictures depicting sexually explicit conduct. \"Sexually explicit conduct\" means material depicting any person under the age of 18 years engaged in graphic sexual intercourse, including genital-genital, oral-genital, anal-genital, or oral-anal whether between persons of the same or opposite sex, or lascivious simulated sexual intercourse where the genitals, breast or pubic area of any person is exhibited. In addition, any material depicting a minor involved in bestiality; masturbation; sadistic or masochistic abuse; or lascivious exhibition of the genitals or pubic area.",
-                "tag": "Pictures -- Child Pornography"
-            },
-            "Pictures -- Child Erotica": {
-                "description": "The image files contained in this tag do not meet the statutory requirement to be considered child pornography. These image files depict juvenile subjects who are shown wearing sexually suggestive clothing, posing in sexually suggestive positions, or that appear to be possessed for a sexual purpose. Image files of this nature are often referred to as \"child erotica\" by forensic examiners and investigators.",
-                "tag": "Pictures -- Child Erotica"
-            },
-            "Pictures -- Age Difficult": {
-                "description": "The image files in this tag are pornographic in nature and depict younger looking subjects who may be juveniles under the age of 18, or may be young adults who are 18 years of age or older. Therefore, without positive identification of the subjects shown in the image files in this tag, I cannot make an accurate determination regarding the legal or illegal nature of the image files. Pornographic image files and video files of this nature are often referred to as \"age difficult\" pornography by forensic examiners and investigators.",
-                "tag": "Pictures -- Age Difficult"
-            },
-            "Videos": {
-                "description": "Videos contains videos that are recovered using parsing or carving. Supported formats for parsing include AVI, MP4, MOV, MPEG, DIVX, A3GP, ASF, WMV, DVR-MS, MKV, VOB, MOD, and WEBM. Supported carving formats include AVI, MP4, DIVX, A3GP, M4A, QT, and WEBM.",
-                "tag": "Videos"
-            },
-            "Videos -- Child Pornography": {
-                "description": "The video files contained in this tag appear to depict child pornography. Child pornography consists of any visual depiction, including photographs, film, videos, or pictures depicting sexually explicit conduct. \"Sexually explicit conduct\" means material depicting any person under the age of 18 years engaged in graphic sexual intercourse, including genital-genital, oral-genital, anal-genital, or oral-anal whether between persons of the same or opposite sex, or lascivious simulated sexual intercourse where the genitals, breast or pubic area of any person is exhibited. In addition, any material depicting a minor involved in bestiality; masturbation; sadistic or masochistic abuse; or lascivious exhibition of the genitals or pubic area.",
-                "tag": "Videos -- Child Pornography"
-            },
-            "Videos -- Child Erotica": {
-                "description": "The video files contained in this tag do not meet the statutory requirement to be considered child pornography. These video files depict juvenile subjects who are shown wearing sexually suggestive clothing, posing in sexually suggestive positions, or that appear to be possessed for a sexual purpose. Video files of this nature are often referred to as \"child erotica\" by forensic examiners and investigators.",
-                "tag": "Videos -- Child Erotica"
-            },
-            "Videos -- Age Difficult": {
-                "description": "The video files in this tag are pornographic in nature and depict younger looking subjects who may be juveniles under the age of 18, or may be young adults who are 18 years of age or older. Therefore, without positive identification of the subjects shown in the video files in this tag, I cannot make an accurate determination regarding the legal or illegal nature of the video files. Video files of this nature are often referred to as \"age difficult\" pornography by forensic examiners and investigators.",
-                "tag": "Videos -- Age Difficult"
-            }
-        }
-        
-        # Combine the appropriate artifacts based on the selected ones
-        artifacts_map = {**common_artifacts}
-        if any(artifact.startswith("iOS") or artifact.startswith("Apple") or artifact.startswith("Safari") or artifact.startswith("iPhone") for artifact in selected_artifacts):
-            artifacts_map.update(ios_artifacts)
-        else:
-            artifacts_map.update(android_artifacts)
-        
-        # Organize selected artifacts to ensure proper ordering
-        # This organizes main categories followed by their subcategories
-        organized_artifacts = []
-        
-        # First, add main categories that don't have subcategories
-        for artifact in selected_artifacts:
-            if " -- " not in artifact and artifact not in ["Pictures", "Videos"]:
-                organized_artifacts.append(artifact)
-        
-        # Next, add Pictures and its subcategories if selected
-        if "Pictures" in selected_artifacts:
-            organized_artifacts.append("Pictures")
-            for artifact in selected_artifacts:
-                if artifact.startswith("Pictures -- "):
-                    organized_artifacts.append(artifact)
-        
-        # Then, add Videos and its subcategories if selected
-        if "Videos" in selected_artifacts:
-            organized_artifacts.append("Videos")
-            for artifact in selected_artifacts:
-                if artifact.startswith("Videos -- "):
-                    organized_artifacts.append(artifact)
-        
-        # Add any remaining artifacts that weren't processed
-        for artifact in selected_artifacts:
-            if artifact not in organized_artifacts:
-                organized_artifacts.append(artifact)
-        
-        # Number counter for main artifacts only
-        counter = 1
-        
-        # Add selected artifacts to the document
-        for artifact in organized_artifacts:
-            if artifact in artifacts_map:
-                # Check if it's a subtag (for Pictures or Videos)
-                is_subtag = " -- " in artifact
-                
-                # For main categories
-                if not is_subtag:
-                    # Add item number and artifact name with proper formatting
-                    p = doc.add_paragraph()
-                    p.style = doc.styles['Normal']
-                    run = p.add_run(f"{counter}) ")
-                    run.font.name = 'Arial'
-                    run.font.size = Pt(11)
-                    
-                    run = p.add_run(f"{artifact.upper()}")
-                    run.font.bold = True
-                    run.font.name = 'Arial'
-                    run.font.size = Pt(11)
-                    
-                    # Add blank line
-                    doc.add_paragraph()
-                    
-                    # For all main categories, add description first
-                    # Add description first
-                    p = doc.add_paragraph()
-                    p.style = doc.styles['Normal']
-                    run = p.add_run(artifacts_map[artifact]["description"])
-                    run.font.name = 'Arial'
-                    run.font.size = Pt(11)
-                    
-                    # Add blank line after description
-                    doc.add_paragraph()
-                    
-                    # Then add tag information with underlining
-                    p = doc.add_paragraph()
-                    p.style = doc.styles['Normal']
-                    run = p.add_run(f"Tag: {artifacts_map[artifact]['tag']}")
-                    run.font.underline = True
-                    run.font.name = 'Arial'
-                    run.font.size = Pt(11)
-                    
-                    # Increment counter for main artifacts
-                    counter += 1
-                else:
-                    # For subtags under Pictures and Videos, keep tag first then description
-                    # Add tag information FIRST
-                    p = doc.add_paragraph()
-                    p.style = doc.styles['Normal']
-                    run = p.add_run(f"Tag: {artifacts_map[artifact]['tag']}")
-                    run.font.underline = True
-                    run.font.name = 'Arial'
-                    run.font.size = Pt(11)
-                    
-                    # Add blank line after tag
-                    doc.add_paragraph()
-                    
-                    # Then add description
-                    p = doc.add_paragraph()
-                    p.style = doc.styles['Normal']
-                    run = p.add_run(artifacts_map[artifact]["description"])
-                    run.font.name = 'Arial'
-                    run.font.size = Pt(11)
-                
-                # Add blank line after the description
-                doc.add_paragraph()
-                
-                # Add DEVICE ARTIFACTS indication
-                p = doc.add_paragraph()
-                p.style = doc.styles['Normal']
-                run = p.add_run("(DEVICE ARTIFACTS)\n")
-                run.font.name = 'Arial'
-                run.font.size = Pt(11)
-                
-                # Add blank line after each artifact
-                doc.add_paragraph()
-    
+        from magnet_artifacts import write_artifact_paragraphs, preferred_platform_for
+        platform = preferred_platform_for("mobile", getattr(self, "_artifact_device_type", None))
+        preferred = ["iOS", "Android", "Cloud", "Refined Results"] if platform == "iOS" else ["Android", "iOS", "Cloud", "Refined Results"]
+        write_artifact_paragraphs(
+            doc,
+            selected_artifacts,
+            style="mobile",
+            preferred_platforms=preferred,
+            sources=getattr(self, "selected_artifact_sources", {}),
+        )
+
     def validate_fields(self):
         missing_fields = []
 
@@ -2196,8 +1686,11 @@ class MobileFullExam(TkinterDnD.Tk):
                 "Case Type": self.offense_type.get(),
             }
             
-            if self.legal_self.get() == 'Search Warrant' and not self.sw_service_date.get().strip():
-                missing_fields.append("Search Warrant Service Date")
+            if not self.sw_service_date.get().strip():
+                if self.legal_self.get() == 'Search Warrant':
+                    missing_fields.append("Search Warrant Service Date")
+                else:
+                    missing_fields.append("Date of Possession")
                 
             # Check time frame fields for Case Agent
             if (hasattr(self, 'legal_self') and self.legal_self.get() == 'Search Warrant' and 
@@ -2485,7 +1978,7 @@ class MobileFullExam(TkinterDnD.Tk):
 
             if self.role_type.get() == "Agency Assist":
                 request_date = self.parse_request_date(self.request_date.get())
-            elif self.role_type.get() == "Case Agent" and self.legal_self.get() == 'Search Warrant':
+            elif self.role_type.get() == "Case Agent":
                 request_date = self.parse_request_date(self.sw_service_date.get())
             else:
                 request_date = ""
@@ -2566,14 +2059,19 @@ class MobileFullExam(TkinterDnD.Tk):
                 messagebox.showerror("Missing Fields", "\n".join(identity_missing))
                 return
             data = prefer_gui_over_parsed(data, extraction_data)
+            data = apply_preview_overrides_to_data(self, data)
             if preview_only:
+                set_extracted_preview(self, extraction_data, "mobile")
                 suggested = apply_suggested_filename(self, "Mobile", data.get("device_model", ""))
                 show_placeholder_preview(
                     self,
-                    mobile_preview_rows(
-                        data,
-                        officer_text=self.format_case_officer(data),
-                        image_date=self.format_extraction_date(data.get("formatted_date", "")),
+                    apply_overrides_to_preview_rows(
+                        self,
+                        mobile_preview_rows(
+                            data,
+                            officer_text=self.format_case_officer(data),
+                            image_date=self.format_extraction_date(data.get("formatted_date", "")),
+                        ),
                     ),
                     suggested,
                 )
@@ -2692,6 +2190,7 @@ class MobileFullExam(TkinterDnD.Tk):
             self.save_document(doc)
 
             self.selected_artifacts = []
+            self.selected_artifact_sources = {}
 
         except Exception as e:
             import traceback
@@ -2781,6 +2280,7 @@ class MobileFullExam(TkinterDnD.Tk):
         }
         
         # Debug output
+        overlay_preview_overrides(self, replacement_map)
         print("\nGenerating replacement content:")
         
         # Create content for each search string
@@ -2900,8 +2400,11 @@ class MobileFullExam(TkinterDnD.Tk):
                 "Case Type": self.offense_type.get(),
             }
             
-            if self.legal_self.get() == 'Search Warrant' and not self.sw_service_date.get().strip():
-                missing_fields.append("Search Warrant Service Date")
+            if not self.sw_service_date.get().strip():
+                if self.legal_self.get() == 'Search Warrant':
+                    missing_fields.append("Search Warrant Service Date")
+                else:
+                    missing_fields.append("Date of Possession")
                 
             # Check time frame fields for Case Agent
             if (hasattr(self, 'legal_self') and self.legal_self.get() == 'Search Warrant' and 
@@ -3005,33 +2508,19 @@ class MobileFullExam(TkinterDnD.Tk):
         # Add Paragraph Seven - Forensic Processing Header
         self.add_bold_underline_paragraph(new_doc, self.paragraphs['seven'])
 
-        # Add Paragraph Eight - Updated logic for multiple software combinations
         selected_software = self.get_selected_forensic_software()
-        
-        if len(selected_software) == 1:
-            if "Axiom" in selected_software:
-                add_paragraph_with_style(new_doc, self.paragraphs['eight_axiom'])
-            elif "Cellebrite" in selected_software:
-                add_paragraph_with_style(new_doc, self.paragraphs['eight_cellebrite'])
-            elif "Griffeye" in selected_software:
-                # You may want to add a specific paragraph for Griffeye-only processing
-                add_paragraph_with_style(new_doc, self.paragraphs.get('eight_griffeye', self.paragraphs['griffeye_para']))
-        elif len(selected_software) == 2:
-            if "Axiom" in selected_software and "Cellebrite" in selected_software:
-                add_paragraph_with_style(new_doc, self.paragraphs['eight_both'])
-            elif "Griffeye" in selected_software:
-                # Handle combinations with Griffeye
-                other_software = [s for s in selected_software if s != "Griffeye"][0]
-                if other_software == "Axiom":
-                    add_paragraph_with_style(new_doc, self.paragraphs['eight_axiom'])
-                elif other_software == "Cellebrite":
-                    add_paragraph_with_style(new_doc, self.paragraphs['eight_cellebrite'])
-        elif len(selected_software) >= 3:
-            # All three software packages
-            add_paragraph_with_style(new_doc, self.paragraphs['eight_both'])
+        has_axiom = "Axiom" in selected_software
+        has_cellebrite = "Cellebrite" in selected_software
+        has_griffeye = "Griffeye" in selected_software
 
-        # Add Griffeye paragraph if Griffeye is selected
-        if self.griffeye_var.get() == 1:
+        if has_axiom and has_cellebrite:
+            add_paragraph_with_style(new_doc, self.paragraphs['eight_both'])
+        elif has_axiom:
+            add_paragraph_with_style(new_doc, self.paragraphs['eight_axiom'])
+        elif has_cellebrite:
+            add_paragraph_with_style(new_doc, self.paragraphs['eight_cellebrite'])
+
+        if has_griffeye:
             add_paragraph_with_style(new_doc, self.paragraphs['griffeye_para'])
 
         # Check if "No Evidence Found" is checked
@@ -3267,4 +2756,4 @@ class MobileFullExam(TkinterDnD.Tk):
         close_and_return(self)
 
 
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.1) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.0.3) © 2026 #

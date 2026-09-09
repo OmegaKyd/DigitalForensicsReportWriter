@@ -21,8 +21,37 @@ def writable_dir():
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent
 
+
+def _dnd_toplevel_class():
+    """Toplevel that works with older tkinterdnd2 builds that only ship Tk."""
+    try:
+        from tkinterdnd2 import TkinterDnD
+    except Exception:
+        return tk.Toplevel
+    existing = getattr(TkinterDnD, "Toplevel", None)
+    if existing is not None:
+        return existing
+
+    class DndToplevel(tk.Toplevel):
+        pass
+
+    src = getattr(TkinterDnD, "Tk", None)
+    if src is not None:
+        for cls in src.__mro__:
+            if cls in (object, tk.Tk):
+                continue
+            for name, value in vars(cls).items():
+                if name.startswith("__") or name in vars(DndToplevel):
+                    continue
+                if callable(value):
+                    setattr(DndToplevel, name, value)
+    return DndToplevel
+
+
+DndToplevel = _dnd_toplevel_class()
+
 APP_NAME = "Digital Forensics Report Writer"
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.3"
 COPYRIGHT_YEAR = "2026"
 GITHUB_URL = "https://github.com/omegakyd"
 # Previous product name; used only to migrate AppData files from v1.0.0 and earlier.
@@ -380,11 +409,18 @@ def close_and_return(app):
     except Exception:
         pass
     master = getattr(app, "master", None)
+    owns_root = bool(getattr(app, "_owns_hidden_root", False))
     try:
         app.destroy()
     except Exception:
         pass
     if not master:
+        return
+    if owns_root:
+        try:
+            master.destroy()
+        except Exception:
+            pass
         return
     try:
         apply_theme(master)
@@ -487,7 +523,19 @@ def apply_theme(root):
               background=[("readonly", colors["entry_bg"])])
 
     style.configure("TCheckbutton", background=colors["panel"], foreground=colors["text"], font=("Segoe UI", 10))
+    style.map(
+        "TCheckbutton",
+        background=[("active", colors["card"]), ("selected", colors["panel"]), ("pressed", colors["card"])],
+        foreground=[("active", colors["text"]), ("selected", colors["text"]), ("pressed", colors["text"])],
+        indicatorcolor=[("selected", colors["accent"]), ("active", colors["accent_dark"]), ("pressed", colors["accent"])],
+    )
     style.configure("TRadiobutton", background=colors["panel"], foreground=colors["text"])
+    style.map(
+        "TRadiobutton",
+        background=[("active", colors["card"]), ("selected", colors["panel"]), ("pressed", colors["card"])],
+        foreground=[("active", colors["text"]), ("selected", colors["text"]), ("pressed", colors["text"])],
+        indicatorcolor=[("selected", colors["accent"]), ("active", colors["accent_dark"])],
+    )
     style.configure("TScrollbar", background=colors["panel"], troughcolor=colors["bg"], arrowcolor=colors["accent"])
     style.configure("TPanedwindow", background=colors["bg"])
     style.configure("TSeparator", background=colors["border"])

@@ -25,7 +25,7 @@ PY_PLACEHOLDERS = [
         ("PY_REQDATE", "Request date (formatted)"),
         ("PY_REQOFF", "Requesting officer name"),
         ("PY_REQAGENCY", "Requesting agency"),
-        ("PY_OWNER", "Device owner"),
+        ("PY_OWNER", "Device owner (mobile/PC) or account owner (warrant)"),
         ("PY_EVIDENCE", "Evidence number"),
     ]),
     ("Device", [
@@ -59,6 +59,7 @@ PY_PLACEHOLDERS = [
         ("PY_PROVIDER", "Service provider"),
         ("PY_ACCOUNT / PY_ACCOUNTID", "Account identifier"),
         ("PY_DATASIZE", "Returned data size"),
+        ("PY_OWNER", "Account owner"),
         ("PY_SERVEDATE", "Warrant service date"),
         ("PY_RETURNDATE", "Data return date"),
         ("PY_LIMITSTART", "Time-frame start"),
@@ -128,8 +129,27 @@ def attach_app_menu(window, is_start=False):
     return menubar
 
 
+def _autosave_window(target):
+    if target is None:
+        return
+    try:
+        timer = getattr(target, "_save_timer", None)
+        if timer:
+            target.after_cancel(timer)
+            target._save_timer = None
+    except Exception:
+        pass
+    try:
+        if hasattr(target, "_perform_auto_save"):
+            target._perform_auto_save()
+    except Exception:
+        pass
+
+
 def _exit_program(window, is_start):
     master = getattr(window, "master", None)
+    _autosave_window(window)
+    _autosave_window(master)
     try:
         window.destroy()
     except Exception:
@@ -257,15 +277,17 @@ def open_template_manager(parent):
     win = tk.Toplevel(parent)
     win.title("Manage Templates")
     win.configure(bg=COLORS["bg"])
-    win.geometry("640x420")
+    win.geometry("720x460")
+    win.minsize(560, 400)
     win.transient(parent)
 
-    path_label = ttk.Label(win, text=f"Folder: {folder}", wraplength=600)
+    path_label = ttk.Label(win, text=f"Folder: {folder}", wraplength=680)
     path_label.pack(anchor="w", padx=12, pady=(10, 4))
     ttk.Label(
         win,
-        text="Add, rename, or remove .docx templates. Files are stored in your DFR Templates folder.",
-        wraplength=600,
+        text="Add, rename, or remove .docx templates. Files are stored in your DFR Templates folder. "
+             "Removed files stay removed after restart. Use Restore Official Templates if you want the packaged files back.",
+        wraplength=680,
         style="Hint.TLabel",
     ).pack(anchor="w", padx=12, pady=(0, 8))
 
@@ -279,13 +301,18 @@ def open_template_manager(parent):
     listbox.pack(fill="both", expand=True, padx=12, pady=(0, 8))
 
     def current_folder():
-        return user_templates_dir()
+        from report_common import resolve_templates_dir
+        return resolve_templates_dir()
 
     def refresh():
         folder = current_folder()
         path_label.configure(text=f"Folder: {folder}")
         listbox.delete(0, "end")
-        for path in sorted(folder.glob("*.docx")):
+        try:
+            files = sorted(folder.glob("*.docx"))
+        except Exception:
+            files = []
+        for path in files:
             if not path.name.startswith("~$"):
                 listbox.insert("end", path.name)
 
@@ -335,11 +362,56 @@ def open_template_manager(parent):
         if path is None:
             messagebox.showinfo("Manage Templates", "Select a template first.", parent=win)
             return
-        if not messagebox.askyesno("Remove Template", f"Delete {path.name}?", parent=win):
+        if not messagebox.askyesno("Remove Template", f"Delete {path.name} from the templates folder?", parent=win):
             return
-        path.unlink()
+        try:
+            if path.exists():
+                path.unlink()
+            else:
+                messagebox.showerror(
+                    "Remove Template",
+                    f"{path.name} was not found in:\n{path.parent}",
+                    parent=win,
+                )
+                refresh()
+                return
+        except Exception as exc:
+            messagebox.showerror(
+                "Remove Template",
+                f"Could not delete {path.name}.\n\n{exc}\n\n"
+                "Close the file if it is open in Word and try again.",
+                parent=win,
+            )
+            return
         refresh()
         _refresh_open_pickers(parent)
+
+    def restore_official():
+        from report_common import restore_official_templates
+
+        folder = current_folder()
+        if not messagebox.askyesno(
+            "Restore Official Templates",
+            "Copy the packaged DFR templates back into this folder?\n\n"
+            "Existing files with the same name will be left alone.",
+            parent=win,
+        ):
+            return
+        copied = restore_official_templates(folder, overwrite=False)
+        refresh()
+        _refresh_open_pickers(parent)
+        if copied:
+            messagebox.showinfo(
+                "Restore Official Templates",
+                "Restored:\n" + "\n".join(copied),
+                parent=win,
+            )
+        else:
+            messagebox.showinfo(
+                "Restore Official Templates",
+                "No packaged templates were missing from this folder.",
+                parent=win,
+            )
 
     def open_folder():
         try:
@@ -347,11 +419,16 @@ def open_template_manager(parent):
         except Exception:
             messagebox.showinfo("DFR Templates", str(current_folder()), parent=win)
 
-    buttons = ttk.Frame(win)
-    buttons.pack(fill="x", padx=12, pady=(0, 12))
-    ttk.Button(buttons, text="Add...", command=add_template).pack(side="left", padx=4)
-    ttk.Button(buttons, text="Rename...", command=rename_template).pack(side="left", padx=4)
-    ttk.Button(buttons, text="Remove", command=remove_template).pack(side="left", padx=4)
-    ttk.Button(buttons, text="Open Folder", command=open_folder).pack(side="left", padx=4)
-    ttk.Button(buttons, text="Close", command=win.destroy).pack(side="right", padx=4)
+    actions = ttk.Frame(win)
+    actions.pack(fill="x", padx=12, pady=(0, 12))
+    row1 = ttk.Frame(actions)
+    row1.pack(fill="x")
+    row2 = ttk.Frame(actions)
+    row2.pack(fill="x", pady=(8, 0))
+    ttk.Button(row1, text="Add...", command=add_template).pack(side="left", padx=(0, 6))
+    ttk.Button(row1, text="Rename...", command=rename_template).pack(side="left", padx=(0, 6))
+    ttk.Button(row1, text="Remove", command=remove_template).pack(side="left", padx=(0, 6))
+    ttk.Button(row1, text="Open Folder", command=open_folder).pack(side="left")
+    ttk.Button(row2, text="Restore Official Templates", command=restore_official).pack(side="left")
+    ttk.Button(row2, text="Close", command=win.destroy).pack(side="right")
     refresh()

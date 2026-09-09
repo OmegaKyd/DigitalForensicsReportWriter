@@ -14,6 +14,9 @@ datas = [
 settings_json = os.path.join(here, "settings.json")
 if os.path.isfile(settings_json):
     datas.append((settings_json, "."))
+magnet_json = os.path.join(here, "magnet_artifacts.json")
+if os.path.isfile(magnet_json):
+    datas.append((magnet_json, "."))
 templates = os.path.join(here, "Templates")
 if os.path.isdir(templates):
     datas.append((templates, "Templates"))
