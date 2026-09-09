@@ -399,31 +399,15 @@ class PCFullExam(DndToplevel):
 
     def toggle_sw_date_and_time_frame(self, event=None):
         """Handle both SW date and time frame toggling for Case Agent"""
+        self.toggle_sw_date()
         if hasattr(self, 'legal_self') and self.legal_self.get() == 'Search Warrant':
-            # Show the SW date frame
-            if hasattr(self, 'sw_date_frame'):
-                self.sw_date_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=2)
-            
-            # Show time frame section
             self.case_agent_time_frame_label.grid(row=3, column=0, sticky="w", pady=2)
             self.case_agent_time_frame_checkbox_frame.grid(row=3, column=1, sticky="ew", pady=2)
-            # If checkbox is checked, also show the fields
             self.toggle_case_agent_time_frame_fields()
         else:
-            # Hide the SW date frame and clear its value
-            if hasattr(self, 'sw_date_frame'):
-                self.sw_date_frame.grid_remove()
-                
-                # Clear the SW service date field when hiding it
-                if hasattr(self, 'sw_service_date'):
-                    self.sw_service_date.delete(0, tk.END)
-            
-            # Hide time frame section and clear values
             self.case_agent_time_frame_label.grid_remove()
             self.case_agent_time_frame_checkbox_frame.grid_remove()
             self.case_agent_time_frame_fields.grid_remove()
-            
-            # Clear values
             self.case_agent_time_frame_var.set(0)
             if hasattr(self, 'case_agent_time_frame_start'):
                 self.case_agent_time_frame_start.delete(0, tk.END)
