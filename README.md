@@ -14,7 +14,7 @@ GitHub: [https://github.com/omegakyd](https://github.com/omegakyd)
 | --- | --- | --- | --- |
 | Mobile — Portable Case | `mobile_portable_case.py` | Cellebrite UFD / Summary / Quick View, GrayKey PDF | `DFR Mobile.docx` |
 | Mobile — Full Exam | `mobile_full_exam.py` | Cellebrite UFD / Summary / Quick View, GrayKey PDF | `DFR Mobile.docx` |
-| PC — Portable Case | `pc_portable_case.py` | TX1, FTK Imager, X-Ways, or Cellebrite Digital Collector log | `DFR Storage.docx` |
+| PC — Portable Case | `pc_portable_case.py` | TX1, FTK Imager, X-Ways, or Cellebrite Digital Collector log | `DFR Computer.docx` |
 | PC — Full Exam | `pc_full_exam.py` | TX1, FTK Imager, X-Ways, or Cellebrite Digital Collector log | `DFR Computer.docx` |
 | Warrant Data Returns | `sw_data_review.py` | Warrant, subpoena, or service-provider return | `DFR SW Return.docx` |
 
