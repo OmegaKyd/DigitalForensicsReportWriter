@@ -51,7 +51,7 @@ def _dnd_toplevel_class():
 DndToplevel = _dnd_toplevel_class()
 
 APP_NAME = "Digital Forensics Report Writer"
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.0.4"
 COPYRIGHT_YEAR = "2026"
 GITHUB_URL = "https://github.com/omegakyd"
 # Previous product name; used only to migrate AppData files from v1.0.0 and earlier.
@@ -394,6 +394,85 @@ def size_window(root, width=1260, height=700, min_width=980, min_height=520):
         pass
 
 
+def _safe_destroy(widget):
+    if widget is None:
+        return
+    try:
+        widget.grab_release()
+    except Exception:
+        pass
+    try:
+        widget.protocol("WM_DELETE_WINDOW", lambda: None)
+    except Exception:
+        pass
+    try:
+        if widget.winfo_exists():
+            widget.withdraw()
+    except Exception:
+        pass
+    try:
+        if widget.winfo_exists():
+            widget.destroy()
+    except Exception:
+        pass
+
+
+def _hide_stray_report_windows(master, keep=None):
+    if master is None:
+        return
+    try:
+        children = list(master.winfo_children())
+    except Exception:
+        return
+    for child in children:
+        if child is keep or child is master:
+            continue
+        try:
+            kind = child.winfo_class()
+        except Exception:
+            continue
+        if kind not in ("Toplevel", "Tk"):
+            continue
+        try:
+            title = child.title()
+        except Exception:
+            title = ""
+        if "Digital Forensics Report Writer" in title or "Portable Case" in title or "Warrant" in title:
+            _safe_destroy(child)
+
+
+def _show_start_screen(master):
+    if master is None:
+        return
+    try:
+        if not master.winfo_exists():
+            return
+    except Exception:
+        return
+    try:
+        apply_theme(master)
+    except Exception:
+        pass
+    try:
+        master.deiconify()
+        master.lift()
+        master.focus_force()
+        master.attributes("-topmost", True)
+        master.after(150, lambda: _clear_topmost(master))
+    except Exception:
+        pass
+
+
+def _clear_topmost(master):
+    try:
+        if master.winfo_exists():
+            master.attributes("-topmost", False)
+            master.lift()
+            master.focus_force()
+    except Exception:
+        pass
+
+
 def close_and_return(app):
     """Close a report window and show the start screen again."""
     try:
@@ -410,28 +489,44 @@ def close_and_return(app):
         pass
     master = getattr(app, "master", None)
     owns_root = bool(getattr(app, "_owns_hidden_root", False))
-    try:
-        app.destroy()
-    except Exception:
-        pass
-    if not master:
-        return
-    if owns_root:
+    if master is not None and getattr(master, "open_app", None) is app:
         try:
-            master.destroy()
+            master.open_app = None
         except Exception:
             pass
-        return
     try:
-        apply_theme(master)
+        app.grab_release()
     except Exception:
         pass
     try:
-        master.deiconify()
-        master.lift()
-        master.focus_force()
+        if app.winfo_exists():
+            app.withdraw()
     except Exception:
         pass
+
+    def _finish_close():
+        _safe_destroy(app)
+        _hide_stray_report_windows(master, keep=master)
+        if owns_root:
+            _safe_destroy(master)
+            return
+        _show_start_screen(master)
+
+    scheduler = None
+    for candidate in (master, app):
+        try:
+            if candidate is not None and candidate.winfo_exists():
+                scheduler = candidate
+                break
+        except Exception:
+            continue
+    if scheduler is not None:
+        try:
+            scheduler.after(10, _finish_close)
+            return
+        except Exception:
+            pass
+    _finish_close()
 
 
 def add_action_bar(parent):

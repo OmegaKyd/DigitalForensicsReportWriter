@@ -7,7 +7,7 @@ import os
 import re
 from tkinterdnd2 import DND_FILES, TkinterDnD
 from settings_manager import SettingsManager
-from ui_theme import apply_theme, add_header_bar, add_action_bar, pack_right_actions, size_window, parse_mdy_date, add_date_entry, COLORS, close_and_return, DndToplevel
+from ui_theme import apply_theme, add_header_bar, add_action_bar, pack_right_actions, size_window, parse_mdy_date, add_date_entry, COLORS, FormTabs, close_and_return, DndToplevel
 from app_menu import attach_app_menu
 from paragraphs_manager import fill_paragraph, load_paragraphs
 from report_common import (
@@ -63,47 +63,139 @@ class WarrantDataReturns(DndToplevel):
         
         self.title("Ω Digital Forensics Report Writer - Warrant Data Returns Ω")
         
-        size_window(self, 1120, 720, min_width=980, min_height=660)
+        size_window(self, 1260, 700)
         
         self.main_frame = ttk.Frame(self)
-        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        self.columns_frame = ttk.Frame(self.main_frame)
-        self.columns_frame.pack(fill=tk.X, expand=False, padx=8, pady=8)
+        self.paned_window = ttk.PanedWindow(self.main_frame, orient=tk.HORIZONTAL)
+        self.paned_window.pack(fill=tk.BOTH, expand=True)
+
+        self.left_frame = ttk.Frame(self.paned_window)
+        self.paned_window.add(self.left_frame, weight=3)
+
+        self.form_tabs = FormTabs(self.left_frame)
+        self.tab_request = self.form_tabs.add_tab("request", "Request Info")
+        self.tab_examiner = self.form_tabs.add_tab("examiner", "Examiner Info")
+        self.tab_account = self.form_tabs.add_tab("account", "Account Info")
+        self.tab_output = self.form_tabs.add_tab("output", "Output Info")
+        self.scrollable_frame = self.tab_request
+        self.middle_frame = self.tab_account
+
+        self.right_frame = ttk.Frame(self.paned_window)
+        self.paned_window.add(self.right_frame, weight=2)
         
-        # Left Column 
-        self.left_frame = ttk.Frame(self.columns_frame, padding=0)
-        self.left_frame.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
-        
-        self.scrollable_frame = ttk.Frame(self.left_frame, padding=(2, 2, 2, 2))
-        self.scrollable_frame.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
-        
-        # Middle Column
-        self.middle_frame = ttk.Frame(self.columns_frame, padding=0)
-        self.middle_frame.grid(row=0, column=1, sticky="nsew", padx=0, pady=0)
-        
-        # Right Column
-        self.right_frame = ttk.Frame(self.columns_frame, padding=0)
-        self.right_frame.grid(row=0, column=2, sticky="nsew", padx=0, pady=0)
-        
-        self.columns_frame.columnconfigure(0, weight=1, minsize=320)
-        self.columns_frame.columnconfigure(1, weight=1, minsize=320)
-        self.columns_frame.columnconfigure(2, weight=1, minsize=320)
-        self.columns_frame.rowconfigure(0, weight=0)
+        self.selected_artifacts = []
+        self.selected_artifact_sources = {}
+        self.axiom_report_tags = {}
         
         self.create_widgets()
+        self.bind_all("<MouseWheel>", self._on_mousewheel)
+        self.bind_tab_status_events()
+        self.refresh_tab_status()
 
     def create_widgets(self):
         self.create_left_column_widgets()
+        self.create_examiner_tab_widgets()
         self.create_middle_column_widgets()
+        self.create_output_tab_widgets()
         self.create_right_column_widgets()
+
+    def _on_mousewheel(self, event):
+        if hasattr(self, "form_tabs"):
+            self.form_tabs.on_mousewheel(event)
+
+    def _field_filled(self, widget):
+        if widget is None:
+            return False
+        try:
+            return bool(widget.get().strip())
+        except Exception:
+            return False
+
+    def bind_tab_status_events(self):
+        widgets = [
+            getattr(self, name, None)
+            for name in (
+                "role_type", "request_date", "requesting_agency", "requesting_officer_title",
+                "requesting_officer", "primary_case_offense", "warrant_service_date",
+                "data_return_date", "examiner_agency", "examiner_title", "examiner_name",
+                "dfr_number", "service_provider", "account_identifier", "account_data_size",
+                "account_owner", "output_filename", "save_location",
+            )
+        ]
+        for widget in widgets:
+            if widget is None:
+                continue
+            try:
+                widget.bind("<KeyRelease>", lambda e: self.refresh_tab_status(), add="+")
+                widget.bind("<<ComboboxSelected>>", lambda e: self.refresh_tab_status(), add="+")
+            except Exception:
+                pass
+        for name in ("cb_axiom_var", "cb_cellebrite_var", "cb_griffeye_var", "cb_manual_var"):
+            var = getattr(self, name, None)
+            if var is None:
+                continue
+            try:
+                var.trace_add("write", lambda *_args: self.refresh_tab_status())
+            except Exception:
+                pass
+
+    def refresh_tab_status(self):
+        if not hasattr(self, "form_tabs"):
+            return
+        request_ok = self._field_filled(getattr(self, "role_type", None))
+        request_ok = request_ok and self._field_filled(getattr(self, "primary_case_offense", None))
+        request_ok = request_ok and self._field_filled(getattr(self, "warrant_service_date", None))
+        request_ok = request_ok and self._field_filled(getattr(self, "data_return_date", None))
+        if getattr(self, "role_type", None) and self.role_type.get() != "Case Agent":
+            request_ok = request_ok and all(self._field_filled(getattr(self, name, None)) for name in (
+                "request_date", "requesting_agency", "requesting_officer_title", "requesting_officer"
+            ))
+
+        examiner_ok = self._field_filled(getattr(self, "examiner_name", None))
+        examiner_ok = examiner_ok and self._field_filled(getattr(self, "examiner_agency", None))
+        examiner_ok = examiner_ok and self._field_filled(getattr(self, "examiner_title", None))
+        examiner_ok = examiner_ok and is_complete_dfr_number(self.dfr_number.get() if hasattr(self, "dfr_number") else "")
+
+        account_ok = all(self._field_filled(getattr(self, name, None)) for name in (
+            "service_provider", "account_identifier", "account_data_size", "account_owner"
+        ))
+        try:
+            account_ok = account_ok and bool(self.get_selected_forensic_software())
+        except Exception:
+            pass
+
+        output_ok = bool(self._field_filled(getattr(self, "save_location", None)))
+        if output_ok:
+            try:
+                output_ok = os.path.isdir(self.save_location.get().strip())
+            except Exception:
+                output_ok = False
+
+        self.form_tabs.set_complete("request", request_ok)
+        self.form_tabs.set_complete("examiner", examiner_ok)
+        self.form_tabs.set_complete("account", account_ok)
+        self.form_tabs.set_complete("output", output_ok)
 
 # LEFT PANE
     def create_left_column_widgets(self):
         self.create_role_selection_frame()
         self.create_request_information_frame()
         self.create_warrant_return_dates_frame()
+
+    def create_examiner_tab_widgets(self):
+        parent = getattr(self, "tab_examiner", self.scrollable_frame)
+        original = self.scrollable_frame
+        self.scrollable_frame = parent
         self.create_examiner_information_frame()
+        self.scrollable_frame = original
+
+    def create_output_tab_widgets(self):
+        original_right = self.right_frame
+        self.right_frame = getattr(self, "tab_output", original_right)
+        self.create_output_file_frame()
+        self.right_frame = original_right
 
     def create_role_selection_frame(self):
         role_frame = ttk.LabelFrame(self.scrollable_frame, text="Examination Type", padding=(4, 2))
@@ -350,6 +442,18 @@ class WarrantDataReturns(DndToplevel):
             onvalue=1, offvalue=0, command=self.on_manual_exam_toggled
         ).grid(row=0, column=3, sticky="w", padx=(0, 0), pady=4)
 
+        self.artifacts_button_frame = ttk.Frame(forensic_frame)
+        self.artifacts_button_frame.grid(row=1, column=0, columnspan=4, sticky="w", pady=5)
+        self.select_artifacts_button = ttk.Button(
+            self.artifacts_button_frame,
+            text="Select Artifacts",
+            command=self.open_artifacts_popup,
+        )
+        self.artifacts_count_label = ttk.Label(self.artifacts_button_frame, text="(0 selected)")
+
+        from axiom_html_report import attach_axiom_report_picker
+        attach_axiom_report_picker(self, forensic_frame, device_class="warrant")
+
         for col in range(4):
             forensic_frame.columnconfigure(col, weight=1)
 
@@ -367,10 +471,13 @@ class WarrantDataReturns(DndToplevel):
 
     def on_manual_exam_toggled(self):
         if self.cb_manual_var.get() != 1:
+            self.refresh_tab_status()
             return
         self.cb_cellebrite_var.set(0)
         self.cb_axiom_var.set(0)
         self.cb_griffeye_var.set(0)
+        self._sync_axiom_artifact_controls()
+        self.refresh_tab_status()
 
     def on_processing_software_toggled(self):
         if (
@@ -379,6 +486,34 @@ class WarrantDataReturns(DndToplevel):
             or self.cb_griffeye_var.get() == 1
         ):
             self.cb_manual_var.set(0)
+        self._sync_axiom_artifact_controls()
+        self.refresh_tab_status()
+
+    def _sync_axiom_artifact_controls(self):
+        from axiom_html_report import hide_axiom_report_picker, show_axiom_report_picker
+        if self.cb_axiom_var.get() == 1:
+            self.select_artifacts_button.pack(side=tk.LEFT, padx=5)
+            self.artifacts_count_label.pack(side=tk.LEFT, padx=5)
+            self.update_artifacts_count_label()
+            show_axiom_report_picker(self)
+        else:
+            self.select_artifacts_button.pack_forget()
+            self.artifacts_count_label.pack_forget()
+            hide_axiom_report_picker(self)
+            self.selected_artifacts = []
+            self.selected_artifact_sources = {}
+            self.update_artifacts_count_label()
+
+    def update_artifacts_count_label(self):
+        if hasattr(self, "artifacts_count_label"):
+            count = len(self.selected_artifacts) if hasattr(self, "selected_artifacts") else 0
+            self.artifacts_count_label.config(text=f"({count} selected)")
+
+    def open_artifacts_popup(self):
+        from magnet_artifacts import pick_artifacts
+        pick_artifacts(self, device_class="warrant", device_type="Cloud")
+        self.update_artifacts_count_label()
+        self.refresh_tab_status()
 
     def get_processing_software(self):
         """Cellebrite / AXIOM / Griffeye only. Manual Exam Only is not processing software."""
@@ -528,7 +663,6 @@ class WarrantDataReturns(DndToplevel):
 
     def create_right_column_widgets(self):
         self.create_template_file_frame()
-        self.create_output_file_frame()
 
     # ================== HELPERS ==================
     def toggle_title_entry(self, event=None):
@@ -645,6 +779,32 @@ class WarrantDataReturns(DndToplevel):
                 add(self.paragraphs["four_ca"])
         else:
             add(self.paragraphs["three_b"])
+
+        if hasattr(self, "cb_axiom_var") and self.cb_axiom_var.get() == 1:
+            header = new_doc.add_paragraph()
+            run = header.add_run("ARTIFACTS:")
+            run.font.bold = True
+            run.font.underline = True
+            run.font.name = "Arial"
+            run.font.size = Pt(11)
+            selected = getattr(self, "selected_artifacts", None) or []
+            if selected:
+                from magnet_artifacts import write_artifact_paragraphs
+                write_artifact_paragraphs(
+                    new_doc,
+                    selected,
+                    style="mobile",
+                    preferred_platforms=["Cloud", "Android", "iOS", "Computer", "macOS", "Chromebook", "Refined Results"],
+                    sources=getattr(self, "selected_artifact_sources", {}),
+                    report_tags=getattr(self, "axiom_report_tags", None),
+                    tag_counts=getattr(self, "axiom_tag_counts", None),
+                )
+            else:
+                note = new_doc.add_paragraph()
+                run = note.add_run("No artifacts were selected. Use the 'Select Artifacts' button to include artifacts in the report.")
+                run.font.name = "Arial"
+                run.font.size = Pt(11)
+                run.font.italic = True
 
 ###PARAGRAPHS###
 
@@ -802,6 +962,8 @@ class WarrantDataReturns(DndToplevel):
             'Report_Article': report_article,
             'Processing_Software_List': processing_tools,
             'Report_Software_List': report_tools,
+            'axiom_version': getattr(self, "axiom_version", "") or "",
+            'PY_EXAMINE': getattr(self, "axiom_version", "") or "",
         }
 
         # Optional time frame if checked
@@ -818,7 +980,7 @@ class WarrantDataReturns(DndToplevel):
 
         # Create search docs for replacement
         search_docs = {}
-        for key in ['PY_DFR', 'PY_CASENUMBER', 'PY_EXAMINER', 'PY_REQAGENCY', 'PY_REQOFF', 'PY_SERVEDATE', 'PY_RETURNDATE', 'PY_PROVIDER', 'PY_ACCOUNTID', 'PY_DATASIZE', 'PY_OWNER', 'PY_LIMITSTART', 'PY_LIMITEND']:
+        for key in ['PY_DFR', 'PY_CASENUMBER', 'PY_EXAMINER', 'PY_EXAMINE', 'PY_REQAGENCY', 'PY_REQOFF', 'PY_SERVEDATE', 'PY_RETURNDATE', 'PY_PROVIDER', 'PY_ACCOUNTID', 'PY_DATASIZE', 'PY_OWNER', 'PY_LIMITSTART', 'PY_LIMITEND']:
             search_docs[key] = Document()
             p = search_docs[key].add_paragraph(data.get(key, ''))
             p.style = search_docs[key].styles['Normal']
@@ -1068,7 +1230,7 @@ class WarrantDataReturns(DndToplevel):
             doc_xml_str = etree.tostring(doc._element, encoding='unicode')
             original_xml_str = doc_xml_str
 
-            target_placeholders = ['PY_DFR', 'PY_EXAMINER', 'PY_REQAGENCY', 'PY_REQOFF', 'PY_SERVEDATE', 'PY_RETURNDATE', 'PY_PROVIDER', 'PY_ACCOUNTID', 'PY_DATASIZE', 'PY_OWNER']
+            target_placeholders = [key for key in search_docs.keys() if key != "PY_TEXT"]
 
             for search_string in target_placeholders:
                 if replaced_strings.get(search_string):
@@ -1104,4 +1266,4 @@ if __name__ == "__main__":
     app = WarrantDataReturns()
     app.mainloop()
     
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.3) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.0.4) © 2026 #

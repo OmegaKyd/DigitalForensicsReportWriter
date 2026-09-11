@@ -43,7 +43,8 @@ class StartScreen(TkinterDnD.Tk):
 
         add_header_bar(self, APP_NAME, "Case reports for mobile, computer, and warrant returns")
         footer = add_action_bar(self)
-        ttk.Button(footer, text="Exit", command=self.destroy, width=12).pack(side="right")
+        ttk.Button(footer, text="Exit", command=self.on_close, width=12).pack(side="right")
+        self.open_app = None
 
         self.main_frame = ttk.Frame(self, padding="18")
         self.main_frame.pack(expand=True, fill="both")
@@ -107,36 +108,75 @@ class StartScreen(TkinterDnD.Tk):
         from report_common import ensure_user_templates
         ensure_user_templates(self)
 
-    def launch_mobile_portable_case(self):
+    def _close_open_app(self):
+        app = getattr(self, "open_app", None)
+        self.open_app = None
+        if app is None:
+            return
+        try:
+            timer = getattr(app, "_save_timer", None)
+            if timer:
+                app.after_cancel(timer)
+                app._save_timer = None
+        except Exception:
+            pass
+        try:
+            if hasattr(app, "_perform_auto_save"):
+                app._perform_auto_save()
+        except Exception:
+            pass
+        try:
+            app.grab_release()
+        except Exception:
+            pass
+        try:
+            app.protocol("WM_DELETE_WINDOW", lambda: None)
+        except Exception:
+            pass
+        try:
+            if app.winfo_exists():
+                app.withdraw()
+                app.destroy()
+        except Exception:
+            try:
+                if app.winfo_exists():
+                    app.destroy()
+            except Exception:
+                pass
+
+    def _launch(self, factory):
+        self._close_open_app()
         self.withdraw()
-        app = MobilePortableCase(self)
+        app = factory(self)
+        self.open_app = app
         app.protocol("WM_DELETE_WINDOW", lambda: self.on_app_close(app))
+
+    def launch_mobile_portable_case(self):
+        self._launch(MobilePortableCase)
 
     def launch_mobile_full_exam(self):
-        self.withdraw()
-        app = MobileFullExam(self)
-        app.protocol("WM_DELETE_WINDOW", lambda: self.on_app_close(app))
+        self._launch(MobileFullExam)
 
     def launch_pc_portable_case(self):
-        self.withdraw()
-        app = PCPortableCase(self)
-        app.protocol("WM_DELETE_WINDOW", lambda: self.on_app_close(app))
+        self._launch(PCPortableCase)
 
     def launch_pc_full_exam(self):
-        self.withdraw()
-        app = PCFullExam(self)
-        app.protocol("WM_DELETE_WINDOW", lambda: self.on_app_close(app))
+        self._launch(PCFullExam)
 
     def launch_warrant_data_returns(self):
-        self.withdraw()
-        app = WarrantDataReturns(self)
-        app.protocol("WM_DELETE_WINDOW", lambda: self.on_app_close(app))
+        self._launch(WarrantDataReturns)
 
     def on_close(self):
-        self.destroy()
+        self._close_open_app()
+        try:
+            self.destroy()
+        except Exception:
+            pass
         sys.exit()
 
     def on_app_close(self, app):
+        if getattr(self, "open_app", None) is app:
+            self.open_app = None
         close_and_return(app)
 
 
@@ -152,4 +192,4 @@ if __name__ == "__main__":
             print(f"An unexpected error occurred: {e}")
         sys.exit(1)
 
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.3) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.0.4) © 2026 #

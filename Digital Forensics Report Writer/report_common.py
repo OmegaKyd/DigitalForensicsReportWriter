@@ -1390,6 +1390,7 @@ PREVIEW_TOKEN_DATA_KEYS = {
     "PY_OS": ("Device_OS",),
     "PY_CBVER": ("cellebrite_version",),
     "PY_GKVER": ("GrayKey_OS",),
+    "PY_EXAMINE": ("axiom_version", "PY_EXAMINE"),
     "PY_DEVMAKE": ("device_PCMan",),
     "PY_DEVMODEL": ("device_PCMod",),
     "PY_PCMAN": ("device_PCMan",),
@@ -1639,6 +1640,7 @@ def mobile_preview_rows(data, officer_text="", image_date=""):
         ("PY_OS", data.get("Device_OS", "")),
         ("PY_CBVER", data.get("cellebrite_version", "")),
         ("PY_GKVER", data.get("GrayKey_OS", "")),
+        ("PY_EXAMINE", data.get("axiom_version", "") or data.get("PY_EXAMINE", "")),
     ]
 
 

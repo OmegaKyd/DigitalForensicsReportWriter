@@ -475,7 +475,7 @@ class MobilePortableCase(DndToplevel):
                 "examiner_title": examiner_title_value,
                 "examiner_name": self.examiner_name.get(),
                 "dfr_number_prefix": self.get_dfr_prefix(),
-                "version": "1.0.3"
+                "version": "1.0.4"
             }
             
             self.settings_manager.save_settings(settings_to_save)
@@ -1696,6 +1696,7 @@ class MobilePortableCase(DndToplevel):
                 "PY_OS": Document(),
                 "PY_CBVER": Document(),
                 "PY_GKVER": Document(),
+                "PY_EXAMINE": Document(),
             }
             
             # Generate replacement content for other fields
@@ -1791,6 +1792,7 @@ class MobilePortableCase(DndToplevel):
             "PY_OS": data.get('Device_OS', ''),
             "PY_CBVER": data.get('cellebrite_version', ''),
             "PY_GKVER": data.get('GrayKey_OS', ''),
+            "PY_EXAMINE": data.get('axiom_version') or getattr(self, "axiom_version", "") or "",
         }
         
         # Debug output
@@ -1851,7 +1853,7 @@ class MobilePortableCase(DndToplevel):
             print("\nHandling split placeholders...")
             
             # Look for placeholders that might be split by XML tags
-            target_placeholders = ['PY_DFR', 'PY_OWNER', 'PY_EXAMINER']
+            target_placeholders = [key for key in search_docs.keys() if key != "PY_TEXT"]
             
             for search_string in target_placeholders:
                 if replaced_strings[search_string]:
@@ -2221,4 +2223,4 @@ class MobilePortableCase(DndToplevel):
         close_and_return(self)
 
 
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.3) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.0.4) © 2026 #

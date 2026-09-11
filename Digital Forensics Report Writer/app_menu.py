@@ -54,6 +54,7 @@ PY_PLACEHOLDERS = [
         ("PY_FTKVER", "FTK Imager version"),
         ("PY_TX1VER", "TX1 OS / version"),
         ("PY_XWVER", "X-Ways version"),
+        ("PY_EXAMINE", "Magnet AXIOM version (from HTML or XML export)"),
     ]),
     ("Warrant / provider", [
         ("PY_PROVIDER", "Service provider"),
@@ -148,17 +149,40 @@ def _autosave_window(target):
 
 def _exit_program(window, is_start):
     master = getattr(window, "master", None)
+    root = window if is_start or master is None else master
     _autosave_window(window)
+    _autosave_window(getattr(root, "open_app", None))
     _autosave_window(master)
-    try:
-        window.destroy()
-    except Exception:
-        pass
-    if master is not None:
+    open_app = getattr(root, "open_app", None)
+    if open_app is not None:
         try:
-            master.destroy()
+            root.open_app = None
         except Exception:
             pass
+        try:
+            open_app.protocol("WM_DELETE_WINDOW", lambda: None)
+        except Exception:
+            pass
+        try:
+            if open_app.winfo_exists():
+                open_app.destroy()
+        except Exception:
+            pass
+    if window is not root:
+        try:
+            window.protocol("WM_DELETE_WINDOW", lambda: None)
+        except Exception:
+            pass
+        try:
+            if window.winfo_exists():
+                window.destroy()
+        except Exception:
+            pass
+    try:
+        if root is not None and root.winfo_exists():
+            root.destroy()
+    except Exception:
+        pass
     try:
         sys.exit(0)
     except SystemExit:

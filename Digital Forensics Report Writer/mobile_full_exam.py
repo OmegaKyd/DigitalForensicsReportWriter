@@ -671,7 +671,7 @@ class MobileFullExam(DndToplevel):
                 "examiner_title": examiner_title_value,
                 "examiner_name": self.examiner_name.get(),
                 "dfr_number_prefix": self.get_dfr_prefix(),
-                "version": "1.0.3"
+                "version": "1.0.4"
             }
             
             self.settings_manager.save_settings(settings_to_save)
@@ -772,13 +772,18 @@ class MobileFullExam(DndToplevel):
         # self.select_artifacts_button.pack(side=tk.LEFT, padx=5)
 
         forensic_software_content.columnconfigure(1, weight=1)
+        from axiom_html_report import attach_axiom_report_picker
+        attach_axiom_report_picker(self, forensic_software_content, device_class="mobile")
 
     def on_forensic_software_change(self):
         # Show/hide artifacts button based on Axiom selection
+        from axiom_html_report import hide_axiom_report_picker, show_axiom_report_picker
         if self.axiom_var.get() == 1:
             self.select_artifacts_button.pack(side=tk.LEFT, padx=5)
+            show_axiom_report_picker(self)
         else:
             self.select_artifacts_button.pack_forget()
+            hide_axiom_report_picker(self)
             # Clear selected artifacts when Axiom is unchecked
             self.selected_artifacts = []
             self.selected_artifact_sources = {}
@@ -1639,6 +1644,8 @@ class MobileFullExam(DndToplevel):
             style="mobile",
             preferred_platforms=preferred,
             sources=getattr(self, "selected_artifact_sources", {}),
+            report_tags=getattr(self, "axiom_report_tags", None),
+            tag_counts=getattr(self, "axiom_tag_counts", None),
         )
 
     def validate_fields(self):
@@ -1874,7 +1881,7 @@ class MobileFullExam(DndToplevel):
             print("\nHandling split placeholders...")
             
             # Look for placeholders that might be split by XML tags
-            target_placeholders = ['PY_DFR', 'PY_OWNER', 'PY_EXAMINER']
+            target_placeholders = [key for key in search_docs.keys() if key != "PY_TEXT"]
             
             for search_string in target_placeholders:
                 if replaced_strings[search_string]:
@@ -2151,6 +2158,7 @@ class MobileFullExam(DndToplevel):
                 "PY_OS": Document(),
                 "PY_CBVER": Document(),
                 "PY_GKVER": Document(),
+                "PY_EXAMINE": Document(),
             }
 
             # Generate replacement content for other fields
@@ -2277,6 +2285,7 @@ class MobileFullExam(DndToplevel):
             "PY_OS": data.get('Device_OS', ''),
             "PY_CBVER": data.get('cellebrite_version', ''),
             "PY_GKVER": data.get('GrayKey_OS', ''),
+            "PY_EXAMINE": data.get('axiom_version') or getattr(self, "axiom_version", "") or "",
         }
         
         # Debug output
@@ -2756,4 +2765,4 @@ class MobileFullExam(DndToplevel):
         close_and_return(self)
 
 
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.3) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.0.4) © 2026 #

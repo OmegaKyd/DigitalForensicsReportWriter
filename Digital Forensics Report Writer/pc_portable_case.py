@@ -474,7 +474,7 @@ class PCPortableCase(DndToplevel):
                 "examiner_title": examiner_title_value,
                 "examiner_name": self.examiner_name.get(),
                 "dfr_number_prefix": self.get_dfr_prefix(),
-                "version": "1.0.3"
+                "version": "1.0.4"
             }
             
             self.settings_manager.save_settings(settings_to_save)
@@ -1724,12 +1724,7 @@ class PCPortableCase(DndToplevel):
             print("\nHandling split placeholders...")
             
             # Look for placeholders that might be split by XML tags
-            target_placeholders = [
-                'PY_DFR', 'PY_OWNER', 'PY_EXAMINER', 'PY_CASENUMBER', 'PY_EVIDENCE',
-                'PY_REQOFF', 'PY_PCSERIAL', 'PY_DEVMAKE', 'PY_DEVMODEL', 'PY_PCMAN',
-                'PY_PCMOD', 'PY_CAPACITY', 'PY_HDMAKE', 'PY_HDMODEL', 'PY_HDSERIAL',
-                'PY_TX1VER', 'PY_XWVER', 'PY_DCVER', 'PY_FTKVER',
-            ]
+            target_placeholders = [key for key in search_docs.keys() if key != "PY_TEXT"]
             
             for search_string in target_placeholders:
                 if replaced_strings[search_string]:
@@ -1981,6 +1976,7 @@ class PCPortableCase(DndToplevel):
                 "PY_TX1VER": Document(),
                 "PY_XWVER": Document(),
                 "PY_DCVER": Document(),
+                "PY_EXAMINE": Document(),
                 "PY_ACQUIRE": Document(),   
             }
             
@@ -2168,6 +2164,7 @@ class PCPortableCase(DndToplevel):
             "PY_TX1VER": data.get('TX1_OS', ''),
             "PY_XWVER": data.get('xways_OS', ''),
             "PY_DCVER": data.get('DC_OS', ''),
+            "PY_EXAMINE": data.get('axiom_version') or getattr(self, "axiom_version", "") or "",
         }
 
         if self.device_type.get() != "Computer":
@@ -2520,4 +2517,4 @@ class PCPortableCase(DndToplevel):
         close_and_return(self)
 
 
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.3) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.0.4) © 2026 #

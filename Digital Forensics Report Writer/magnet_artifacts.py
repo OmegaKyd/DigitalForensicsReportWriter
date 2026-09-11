@@ -17,12 +17,14 @@ DEVICE_CLASS_PLATFORMS = {
     "mobile": ("Android", "iOS", "Cloud", "Refined Results"),
     "computer": ("Computer", "macOS", "Chromebook", "Cloud", "Refined Results"),
     "cloud": ("Cloud", "Refined Results"),
+    "warrant": ("Cloud", "Android", "iOS", "Computer", "macOS", "Chromebook", "Refined Results"),
 }
 
 DEFAULT_PLATFORM = {
     "mobile": "Android",
     "computer": "Computer",
     "cloud": "Cloud",
+    "warrant": "Cloud",
 }
 
 CATEGORY_ORDER = (
@@ -196,6 +198,8 @@ def platforms_for_device_class(device_class):
     key = (device_class or "mobile").strip().lower()
     if key in ("pc", "computer/storage", "computer", "storage"):
         key = "computer"
+    if key in ("warrant", "sw", "search warrant", "warrant return"):
+        key = "warrant"
     if key not in DEVICE_CLASS_PLATFORMS:
         key = "mobile"
     catalog = load_catalog()
@@ -301,85 +305,125 @@ def organize_selected(selected_artifacts):
     return organized
 
 
-def write_artifact_paragraphs(doc, selected_artifacts, style="mobile", preferred_platforms=None, sources=None):
+def _artifact_run(paragraph, text, bold=False, underline=False):
+    from docx.oxml.ns import qn
+    from docx.shared import Pt
+
+    run = paragraph.add_run(text)
+    run.font.name = "Arial"
+    run.font.size = Pt(11)
+    run.bold = bold
+    run.font.bold = bold
+    run.underline = underline
+    run.font.underline = underline
+    r_pr = run._element.get_or_add_rPr()
+    r_fonts = r_pr.get_or_add_rFonts()
+    r_fonts.set(qn("w:ascii"), "Arial")
+    r_fonts.set(qn("w:hAnsi"), "Arial")
+    return run
+
+
+def _artifact_paragraph(doc, text, bold=False, underline=False, indent=0.25):
     from docx.shared import Inches, Pt
 
+    paragraph = doc.add_paragraph()
+    paragraph.style = doc.styles["Normal"]
+    paragraph.paragraph_format.left_indent = Inches(indent)
+    paragraph.paragraph_format.first_line_indent = Inches(0)
+    paragraph.paragraph_format.space_before = Pt(0)
+    paragraph.paragraph_format.space_after = Pt(4)
+    _artifact_run(paragraph, text, bold=bold, underline=underline)
+    return paragraph
+
+
+def _tags_for_artifact(artifact, info, report_tags):
+    labels = []
+    seen = set()
+
+    def add(label):
+        text = (label or "").strip()
+        if not text:
+            return
+        key = " ".join(text.replace("_", "/").split()).lower()
+        if key in seen:
+            return
+        seen.add(key)
+        labels.append(text)
+
+    if report_tags:
+        for key in (artifact, info.get("tag")):
+            for label in report_tags.get(key) or ():
+                add(label)
+    if not labels:
+        # A loaded AXIOM report should not invent a generic Pictures/Videos
+        # tag for items that only have CP / CE / AD tags.
+        if report_tags and artifact in ("Pictures", "Videos"):
+            return labels
+        add(info.get("tag") or artifact)
+    return labels
+
+
+def _tag_item_count(label, tag_counts):
+    if not tag_counts or not label:
+        return None
+    if label in tag_counts:
+        try:
+            return int(tag_counts[label])
+        except (TypeError, ValueError):
+            return None
+    needle = " ".join(label.replace("_", "/").split()).lower()
+    for key, value in tag_counts.items():
+        if " ".join(str(key).replace("_", "/").split()).lower() == needle:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def _write_device_artifacts_block(doc, label, tag_counts, indent):
+    count = _tag_item_count(label, tag_counts)
+    if count is not None:
+        noun = "artifact" if count == 1 else "artifacts"
+        _artifact_paragraph(doc, f"This tag contains {count} {noun}.", indent=indent)
+        doc.add_paragraph()
+    _artifact_paragraph(doc, "(DEVICE ARTIFACTS)", indent=indent)
+    doc.add_paragraph()
+    doc.add_paragraph()
+
+
+def write_artifact_paragraphs(doc, selected_artifacts, style="mobile", preferred_platforms=None, sources=None, report_tags=None, tag_counts=None):
     organized = organize_selected(selected_artifacts)
     if not organized:
         return
     counter = 1
+    body_indent = 0.5
+    title_indent = 0.25
     for artifact in organized:
         info = lookup_artifact(artifact, preferred_platforms=preferred_platforms, sources=sources)
         is_media_subtag = artifact.startswith("Pictures -- ") or artifact.startswith("Videos -- ")
-        if style == "pc" and not is_media_subtag:
-            paragraph = doc.add_paragraph()
-            p_pr = paragraph._element.get_or_add_pPr()
-            num_pr = p_pr.get_or_add_numPr()
-            num_pr.get_or_add_ilvl().val = 0
-            num_pr.get_or_add_numId().val = 1
-            paragraph.paragraph_format.left_indent = Inches(0.25)
-            paragraph.paragraph_format.first_line_indent = Inches(-0.25)
-            run = paragraph.add_run(artifact.upper())
-            run.font.bold = True
-            run.font.name = "Arial"
-            run.font.size = Pt(11)
+        tag_labels = _tags_for_artifact(artifact, info, report_tags)
+        if not is_media_subtag:
+            title = f"{counter}) {artifact.upper()}"
+            _artifact_paragraph(doc, title, bold=True, indent=title_indent)
             doc.add_paragraph()
-            paragraph = doc.add_paragraph()
-            paragraph.style = doc.styles["Normal"]
-            run = paragraph.add_run(info["description"])
-            run.font.name = "Arial"
-            run.font.size = Pt(11)
+            _artifact_paragraph(doc, info["description"], indent=body_indent)
             doc.add_paragraph()
-            paragraph = doc.add_paragraph()
-            paragraph.style = doc.styles["Normal"]
-            run = paragraph.add_run(f"Tag: {info['tag']}")
-            run.font.underline = True
-            run.font.name = "Arial"
-            run.font.size = Pt(11)
-        elif not is_media_subtag:
-            paragraph = doc.add_paragraph()
-            paragraph.style = doc.styles["Normal"]
-            run = paragraph.add_run(f"{counter}) ")
-            run.font.name = "Arial"
-            run.font.size = Pt(11)
-            run = paragraph.add_run(artifact.upper())
-            run.font.bold = True
-            run.font.name = "Arial"
-            run.font.size = Pt(11)
-            doc.add_paragraph()
-            paragraph = doc.add_paragraph()
-            paragraph.style = doc.styles["Normal"]
-            run = paragraph.add_run(info["description"])
-            run.font.name = "Arial"
-            run.font.size = Pt(11)
-            doc.add_paragraph()
-            paragraph = doc.add_paragraph()
-            paragraph.style = doc.styles["Normal"]
-            run = paragraph.add_run(f"Tag: {info['tag']}")
-            run.font.underline = True
-            run.font.name = "Arial"
-            run.font.size = Pt(11)
+            for label in tag_labels:
+                _artifact_paragraph(doc, f"Tag: {label}", underline=True, indent=body_indent)
+                doc.add_paragraph()
+                _write_device_artifacts_block(doc, label, tag_counts, body_indent)
             counter += 1
         else:
-            paragraph = doc.add_paragraph()
-            paragraph.style = doc.styles["Normal"]
-            run = paragraph.add_run(f"Tag: {info['tag']}")
-            run.font.underline = True
-            run.font.name = "Arial"
-            run.font.size = Pt(11)
-            doc.add_paragraph()
-            paragraph = doc.add_paragraph()
-            paragraph.style = doc.styles["Normal"]
-            run = paragraph.add_run(info["description"])
-            run.font.name = "Arial"
-            run.font.size = Pt(11)
-        doc.add_paragraph()
-        paragraph = doc.add_paragraph()
-        paragraph.style = doc.styles["Normal"]
-        run = paragraph.add_run("(DEVICE ARTIFACTS)\n")
-        run.font.name = "Arial"
-        run.font.size = Pt(11)
-        doc.add_paragraph()
+            first = True
+            for label in tag_labels:
+                _artifact_paragraph(doc, f"Tag: {label}", underline=True, indent=title_indent)
+                doc.add_paragraph()
+                if first:
+                    _artifact_paragraph(doc, info["description"], indent=body_indent)
+                    doc.add_paragraph()
+                    first = False
+                _write_device_artifacts_block(doc, label, tag_counts, body_indent)
 
 
 def open_artifact_picker(parent, device_class="mobile", device_type=None, previously_selected=None, sources=None):
@@ -403,13 +447,17 @@ def open_artifact_picker(parent, device_class="mobile", device_type=None, previo
     start_platform = preferred_platform_for(device_class, device_type)
 
     window = tk.Toplevel(parent)
+    raw_class = (device_class or "mobile").lower()
+    if raw_class in ("pc", "computer/storage", "storage"):
+        raw_class = "computer"
+    if raw_class in ("sw", "search warrant", "warrant return"):
+        raw_class = "warrant"
     title_class = {
         "mobile": "Mobile",
         "computer": "Computer / Storage",
         "cloud": "Cloud",
-    }.get((device_class or "mobile").lower() if (device_class or "").lower() not in ("pc", "computer/storage", "storage") else "computer", "Mobile")
-    if (device_class or "").lower() in ("pc", "computer", "computer/storage", "storage"):
-        title_class = "Computer / Storage"
+        "warrant": "Warrant / Cloud",
+    }.get(raw_class, "Mobile")
     window.title(f"Select {title_class} Artifacts")
     apply_theme(window)
     window.transient(parent)

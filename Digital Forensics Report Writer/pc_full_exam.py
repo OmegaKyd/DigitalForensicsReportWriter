@@ -585,7 +585,7 @@ class PCFullExam(DndToplevel):
                 "examiner_title": examiner_title_value,
                 "examiner_name": self.examiner_name.get(),
                 "dfr_number_prefix": self.get_dfr_prefix(),
-                "version": "1.0.3"
+                "version": "1.0.4"
             }
             
             self.settings_manager.save_settings(settings_to_save)
@@ -686,6 +686,8 @@ class PCFullExam(DndToplevel):
         # Both button and label will be shown/hidden together
 
         forensic_software_content.columnconfigure(1, weight=1)
+        from axiom_html_report import attach_axiom_report_picker
+        attach_axiom_report_picker(self, forensic_software_content, device_class="computer")
 
     def on_forensic_software_change(self):
         # Get selected software
@@ -704,31 +706,37 @@ class PCFullExam(DndToplevel):
             self.forensic_software = type('obj', (object,), {'get': lambda: ''})()
         
         # Show/hide artifacts button based on Axiom selection
+        from axiom_html_report import hide_axiom_report_picker, show_axiom_report_picker
         if self.axiom_var.get():
             self.select_artifacts_button.pack(side=tk.LEFT, padx=5)
             if hasattr(self, 'artifacts_count_label'):
                 self.artifacts_count_label.pack(side=tk.LEFT, padx=5)
                 self.update_artifacts_count_label()
+            show_axiom_report_picker(self)
         else:
             self.select_artifacts_button.pack_forget()
             if hasattr(self, 'artifacts_count_label'):
                 self.artifacts_count_label.pack_forget()
+            hide_axiom_report_picker(self)
             # Clear artifacts when Axiom is deselected
             self.selected_artifacts = []
             self.selected_artifact_sources = {}
 
 
     def toggle_artifacts_button(self, event=None):
+        from axiom_html_report import hide_axiom_report_picker, show_axiom_report_picker
         # First check if the forensic software selected is Axiom
         if self.forensic_software.get() == 'Axiom':
             # Make sure the button and label are shown
             self.select_artifacts_button.pack(side=tk.LEFT, padx=5)
             self.artifacts_count_label.pack(side=tk.LEFT, padx=5)
             self.update_artifacts_count_label()
+            show_axiom_report_picker(self)
         else:
             # Hide the button and label
             self.select_artifacts_button.pack_forget()
             self.artifacts_count_label.pack_forget()
+            hide_axiom_report_picker(self)
             # Clear any selected artifacts when switching away from Axiom
             self.selected_artifacts = []
             self.selected_artifact_sources = {}
@@ -1701,6 +1709,8 @@ class PCFullExam(DndToplevel):
             style="pc",
             preferred_platforms=["Computer", "macOS", "Chromebook", "Cloud", "Refined Results"],
             sources=getattr(self, "selected_artifact_sources", {}),
+            report_tags=getattr(self, "axiom_report_tags", None),
+            tag_counts=getattr(self, "axiom_tag_counts", None),
         )
 
     def validate_fields(self):
@@ -1966,12 +1976,7 @@ class PCFullExam(DndToplevel):
             print("\nHandling split placeholders...")
             
             # Look for placeholders that might be split by XML tags
-            target_placeholders = [
-                'PY_DFR', 'PY_OWNER', 'PY_EXAMINER', 'PY_CASENUMBER', 'PY_EVIDENCE',
-                'PY_REQOFF', 'PY_PCSERIAL', 'PY_DEVMAKE', 'PY_DEVMODEL', 'PY_PCMAN',
-                'PY_PCMOD', 'PY_CAPACITY', 'PY_HDMAKE', 'PY_HDMODEL', 'PY_HDSERIAL',
-                'PY_TX1VER', 'PY_XWVER', 'PY_DCVER', 'PY_FTKVER',
-            ]
+            target_placeholders = [key for key in search_docs.keys() if key != "PY_TEXT"]
             
             for search_string in target_placeholders:
                 if replaced_strings[search_string]:
@@ -2265,6 +2270,7 @@ class PCFullExam(DndToplevel):
                 "PY_TX1VER": Document(),
                 "PY_XWVER": Document(),
                 "PY_DCVER": Document(),
+                "PY_EXAMINE": Document(),
                 
                 "PY_ACQUIRE": Document(),   
             }
@@ -2498,6 +2504,7 @@ class PCFullExam(DndToplevel):
             "PY_TX1VER": data.get('TX1_OS', ''),
             "PY_XWVER": data.get('xways_OS', ''),
             "PY_DCVER": data.get('DC_OS', ''),
+            "PY_EXAMINE": data.get('axiom_version') or getattr(self, "axiom_version", "") or "",
         }
 
         # Only add PC-specific replacements for non-computer devices
@@ -2998,4 +3005,4 @@ class PCFullExam(DndToplevel):
         close_and_return(self)
 
 
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.3) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.0.4) © 2026 #
