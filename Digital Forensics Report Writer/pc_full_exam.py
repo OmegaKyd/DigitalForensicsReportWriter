@@ -15,6 +15,7 @@ from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from settings_manager import SettingsManager
 from ui_theme import apply_theme, add_header_bar, add_action_bar, pack_right_actions, size_window, build_extracted_info_pane, parse_mdy_date, add_date_entry, COLORS, FormTabs, close_and_return, DndToplevel
 from app_menu import attach_app_menu
+from drafts_manager import add_notes_tab, prepend_exam_notes, delete_draft_for_app
 from paragraphs_manager import fill_paragraph, load_paragraphs
 from report_common import (
     ask_open_file,
@@ -73,6 +74,7 @@ class PCFullExam(DndToplevel):
         self.master = master
         apply_theme(self)
         attach_app_menu(self)
+        self.report_type = "pc_full"
         add_header_bar(self, "Full Computer Exam", "TX1, FTK, X-Ways, and Digital Collector image reports")
         self.action_bar = add_action_bar(self)
         self.preview_button = ttk.Button(self.action_bar, text="Preview", command=self.preview_placeholders)
@@ -108,6 +110,7 @@ class PCFullExam(DndToplevel):
         self.tab_examiner = self.form_tabs.add_tab("examiner", "Examiner Info")
         self.tab_device = self.form_tabs.add_tab("device", "Device Info")
         self.tab_output = self.form_tabs.add_tab("output", "Output Info")
+        add_notes_tab(self, self.form_tabs)
         self.scrollable_frame = self.tab_request
         self.middle_frame = self.tab_device
 
@@ -136,7 +139,7 @@ class PCFullExam(DndToplevel):
     def bind_tab_status_events(self):
         for name in (
             "role_type", "request_date", "request_agency", "request_officer", "case_type",
-            "offense_type", "examiner_name", "DFR_Num", "device_owner", "save_location",
+            "offense_type", "examiner_name", "dfr_number", "device_owner", "save_location",
         ):
             widget = getattr(self, name, None)
             if widget is None:
@@ -157,7 +160,7 @@ class PCFullExam(DndToplevel):
             ))
         elif getattr(self, "role_type", None) and self.role_type.get() == "Case Agent":
             request_ok = self._field_filled(getattr(self, "offense_type", None))
-        examiner_ok = self._field_filled(getattr(self, "examiner_name", None)) and is_complete_dfr_number(self.DFR_Num.get() if hasattr(self, "DFR_Num") else "")
+        examiner_ok = self._field_filled(getattr(self, "examiner_name", None)) and is_complete_dfr_number(self.dfr_number.get() if hasattr(self, "dfr_number") else "")
         device_ok = self._field_filled(getattr(self, "device_owner", None))
         try:
             device_ok = device_ok and bool(self.get_selected_forensic_software())
@@ -541,11 +544,11 @@ class PCFullExam(DndToplevel):
 
         # DFR Report Number
         ttk.Label(examiner_frame, text="DFR Report #:").grid(row=5, column=0, sticky="w", pady=2)
-        self.DFR_Num = ttk.Entry(examiner_frame)
-        self.DFR_Num.grid(row=5, column=1, sticky="ew", pady=2)
+        self.dfr_number = ttk.Entry(examiner_frame)
+        self.dfr_number.grid(row=5, column=1, sticky="ew", pady=2)
         
         # Load saved prefix or use default
-        self.DFR_Num.insert(0, current_dfr_prefix())
+        self.dfr_number.insert(0, current_dfr_prefix())
 
         examiner_frame.columnconfigure(1, weight=1)
 
@@ -584,8 +587,7 @@ class PCFullExam(DndToplevel):
                 "examiner_agency_custom": "",
                 "examiner_title": examiner_title_value,
                 "examiner_name": self.examiner_name.get(),
-                "dfr_number_prefix": self.get_dfr_prefix(),
-                "version": "1.0.4"
+                "version": "1.0.5"
             }
             
             self.settings_manager.save_settings(settings_to_save)
@@ -597,7 +599,7 @@ class PCFullExam(DndToplevel):
             print(f"Error auto-saving examiner settings: {e}")
 
     def get_dfr_prefix(self):
-        dfr_value = self.DFR_Num.get()
+        dfr_value = self.dfr_number.get()
         # Find the last occurrence of "DFR" and include everything up to and including any year/dash pattern
         import re
         match = re.match(r'(DFR\d{4}-)', dfr_value)
@@ -1097,6 +1099,16 @@ class PCFullExam(DndToplevel):
 
     def toggle_request_content(self, event=None):
         # Clear all request information fields when role is changed
+        if getattr(self, "_restoring_draft", False):
+            if self.role_type.get() == "Agency Assist":
+                self.agency_assist_frame.pack(fill=tk.X, padx=5, pady=5)
+                self.case_agent_frame.pack_forget()
+                self.toggle_time_frame_section()
+            else:
+                self.agency_assist_frame.pack_forget()
+                self.case_agent_frame.pack(fill=tk.X, padx=5, pady=5)
+                self.toggle_sw_date_and_time_frame()
+            return
         if hasattr(self, 'request_date'):
             self.request_date.delete(0, tk.END)
         if hasattr(self, 'request_agency'):
@@ -1737,7 +1749,7 @@ class PCFullExam(DndToplevel):
             "Examiner Name": self.examiner_name.get(),
             "Case Number": self.case_number.get(),
             # Removed: "Evidence Number"
-            "DFR Number": self.DFR_Num.get() if is_complete_dfr_number(self.DFR_Num.get()) else "",
+            "DFR Number": self.dfr_number.get() if is_complete_dfr_number(self.dfr_number.get()) else "",
         }
 
         # Check role-specific fields
@@ -2112,7 +2124,7 @@ class PCFullExam(DndToplevel):
                 'Forensic_Software': self.get_selected_forensic_software(),
                 'Case_Number': self.case_number.get(),
                 'evidence_ID': self.evidence_number.get(),
-                'DFR_Num': self.DFR_Num.get(),
+                'DFR_Num': self.dfr_number.get(),
                 'source_device': source_device,
                 'device_PCMan': self.device_PCMan.get(),
                 'device_PCMod': self.device_PCMod.get(),
@@ -2475,7 +2487,7 @@ class PCFullExam(DndToplevel):
         
         # Map search strings to data values
         replacement_map = {
-            "PY_DFR": data.get('DFR_Num', ''),
+            "PY_DFR": (data.get('DFR_Num') or data.get('dfr_number') or self.dfr_number.get()).strip(),
             "PY_CASENUMBER": data.get('Case_Number', ''),
             "PY_EVIDENCE": data.get('evidence_ID', ''),
             "PY_REQDATE": data.get('Request_Date', ''),
@@ -2635,6 +2647,7 @@ class PCFullExam(DndToplevel):
         return (self.request_title_type.get() or "").strip()
 
     def generate_paragraphs(self, data, new_doc):
+        prepend_exam_notes(new_doc, self)
         def add_paragraph_with_style(doc, text):
             text = fill_paragraph(text, data)
             p = doc.add_paragraph(text)
@@ -2756,7 +2769,7 @@ class PCFullExam(DndToplevel):
         # If no filename provided, generate default filename
         if not output_filename:
             # Get DFR Number
-            dfr_number = self.DFR_Num.get().strip()
+            dfr_number = self.dfr_number.get().strip()
             
             # Get Device Owner (apply title case)
             device_owner = self.device_owner.get().strip().title()
@@ -2822,6 +2835,7 @@ class PCFullExam(DndToplevel):
             doc.save(output_path)
             remember_titles_from_form(self)
             remember_agencies_from_form(self)
+            delete_draft_for_app(self)
             messagebox.showinfo("Success", f"Report generated and saved as:\n{output_path}")
             
         except Exception as e:
@@ -3005,4 +3019,4 @@ class PCFullExam(DndToplevel):
         close_and_return(self)
 
 
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.4) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.0.5) © 2026 #

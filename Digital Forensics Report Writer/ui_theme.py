@@ -51,7 +51,7 @@ def _dnd_toplevel_class():
 DndToplevel = _dnd_toplevel_class()
 
 APP_NAME = "Digital Forensics Report Writer"
-APP_VERSION = "1.0.4"
+APP_VERSION = "1.0.5"
 COPYRIGHT_YEAR = "2026"
 GITHUB_URL = "https://github.com/omegakyd"
 # Previous product name; used only to migrate AppData files from v1.0.0 and earlier.

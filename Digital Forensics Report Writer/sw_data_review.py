@@ -9,6 +9,7 @@ from tkinterdnd2 import DND_FILES, TkinterDnD
 from settings_manager import SettingsManager
 from ui_theme import apply_theme, add_header_bar, add_action_bar, pack_right_actions, size_window, parse_mdy_date, add_date_entry, COLORS, FormTabs, close_and_return, DndToplevel
 from app_menu import attach_app_menu
+from drafts_manager import add_notes_tab, prepend_exam_notes, delete_draft_for_app
 from paragraphs_manager import fill_paragraph, load_paragraphs
 from report_common import (
     current_dfr_prefix,
@@ -47,6 +48,7 @@ class WarrantDataReturns(DndToplevel):
         self.master = master
         apply_theme(self)
         attach_app_menu(self)
+        self.report_type = "warrant"
         add_header_bar(self, "Warrant Data Returns", "Warrant, subpoena, and service-provider reports")
         self.action_bar = add_action_bar(self)
         self.generate_button = ttk.Button(self.action_bar, text="Generate Report", command=self.generate_report)
@@ -79,6 +81,7 @@ class WarrantDataReturns(DndToplevel):
         self.tab_examiner = self.form_tabs.add_tab("examiner", "Examiner Info")
         self.tab_account = self.form_tabs.add_tab("account", "Account Info")
         self.tab_output = self.form_tabs.add_tab("output", "Output Info")
+        add_notes_tab(self, self.form_tabs)
         self.scrollable_frame = self.tab_request
         self.middle_frame = self.tab_account
 
@@ -117,9 +120,9 @@ class WarrantDataReturns(DndToplevel):
         widgets = [
             getattr(self, name, None)
             for name in (
-                "role_type", "request_date", "requesting_agency", "requesting_officer_title",
-                "requesting_officer", "primary_case_offense", "warrant_service_date",
-                "data_return_date", "examiner_agency", "examiner_title", "examiner_name",
+                "role_type", "request_date", "request_agency", "request_title_type",
+                "request_officer", "primary_case_offense", "warrant_service_date",
+                "data_return_date", "examiner_agency_type", "examiner_title_type", "examiner_name",
                 "dfr_number", "service_provider", "account_identifier", "account_data_size",
                 "account_owner", "output_filename", "save_location",
             )
@@ -150,12 +153,12 @@ class WarrantDataReturns(DndToplevel):
         request_ok = request_ok and self._field_filled(getattr(self, "data_return_date", None))
         if getattr(self, "role_type", None) and self.role_type.get() != "Case Agent":
             request_ok = request_ok and all(self._field_filled(getattr(self, name, None)) for name in (
-                "request_date", "requesting_agency", "requesting_officer_title", "requesting_officer"
+                "request_date", "request_agency", "request_title_type", "request_officer"
             ))
 
         examiner_ok = self._field_filled(getattr(self, "examiner_name", None))
-        examiner_ok = examiner_ok and self._field_filled(getattr(self, "examiner_agency", None))
-        examiner_ok = examiner_ok and self._field_filled(getattr(self, "examiner_title", None))
+        examiner_ok = examiner_ok and self._field_filled(getattr(self, "examiner_agency_type", None))
+        examiner_ok = examiner_ok and self._field_filled(getattr(self, "examiner_title_type", None))
         examiner_ok = examiner_ok and is_complete_dfr_number(self.dfr_number.get() if hasattr(self, "dfr_number") else "")
 
         account_ok = all(self._field_filled(getattr(self, name, None)) for name in (
@@ -268,23 +271,23 @@ class WarrantDataReturns(DndToplevel):
         self.request_date = add_date_entry(self.agency_assist_fields, row=0, column=1)
 
         ttk.Label(self.agency_assist_fields, text="Requesting Agency:").grid(row=1, column=0, sticky="w", pady=2)
-        self.requesting_agency = ttk.Combobox(self.agency_assist_fields)
-        self.requesting_agency.grid(row=1, column=1, sticky="ew", pady=2)
-        setup_agency_combobox(self.requesting_agency)
+        self.request_agency = ttk.Combobox(self.agency_assist_fields)
+        self.request_agency.grid(row=1, column=1, sticky="ew", pady=2)
+        setup_agency_combobox(self.request_agency)
 
         ttk.Label(self.agency_assist_fields, text="Requesting Officer Title:").grid(row=2, column=0, sticky="w", pady=2)
-        self.requesting_officer_title = ttk.Combobox(self.agency_assist_fields, values=load_request_titles())
-        self.requesting_officer_title.grid(row=2, column=1, sticky="ew", pady=2)
-        self.requesting_officer_title.set("")
-        bind_prefix_typeahead(self.requesting_officer_title)
+        self.request_title_type = ttk.Combobox(self.agency_assist_fields, values=load_request_titles())
+        self.request_title_type.grid(row=2, column=1, sticky="ew", pady=2)
+        self.request_title_type.set("")
+        bind_prefix_typeahead(self.request_title_type)
 
-        self.requesting_officer_title_other = ttk.Entry(self.agency_assist_fields)
-        self.requesting_officer_title_other.grid(row=3, column=1, sticky="ew", pady=2)
-        self.requesting_officer_title_other.grid_remove()
+        self.request_title_entry = ttk.Entry(self.agency_assist_fields)
+        self.request_title_entry.grid(row=3, column=1, sticky="ew", pady=2)
+        self.request_title_entry.grid_remove()
 
         ttk.Label(self.agency_assist_fields, text="Requesting Officer:").grid(row=4, column=0, sticky="w", pady=2)
-        self.requesting_officer = ttk.Entry(self.agency_assist_fields)
-        self.requesting_officer.grid(row=4, column=1, sticky="ew", pady=2)
+        self.request_officer = ttk.Entry(self.agency_assist_fields)
+        self.request_officer.grid(row=4, column=1, sticky="ew", pady=2)
         self.agency_assist_fields.columnconfigure(1, weight=1)
 
         ttk.Label(request_frame, text="Primary Case Offense:").grid(row=1, column=0, sticky="w", pady=2)
@@ -303,41 +306,41 @@ class WarrantDataReturns(DndToplevel):
                 self.offense_var.set(formatted)
 
     def toggle_requesting_officer_title_other(self, event=None):
-        if self.requesting_officer_title.get() == "Other":
-            self.requesting_officer_title_other.grid()
+        if self.request_title_type.get() == "Other":
+            self.request_title_entry.grid()
         else:
-            self.requesting_officer_title_other.grid_remove()
-            self.requesting_officer_title_other.delete(0, tk.END)
+            self.request_title_entry.grid_remove()
+            self.request_title_entry.delete(0, tk.END)
 
     def create_examiner_information_frame(self):
         examiner_frame = ttk.LabelFrame(self.scrollable_frame, text="Examiner Information", padding=(4, 2))
         examiner_frame.pack(fill=tk.X, padx=2, pady=2)
 
         ttk.Label(examiner_frame, text="Examiner Agency:").grid(row=0, column=0, sticky="w", pady=2)
-        self.examiner_agency = ttk.Combobox(examiner_frame)
-        self.examiner_agency.grid(row=0, column=1, sticky="ew", pady=2)
+        self.examiner_agency_type = ttk.Combobox(examiner_frame)
+        self.examiner_agency_type.grid(row=0, column=1, sticky="ew", pady=2)
         setup_agency_combobox(
-            self.examiner_agency,
+            self.examiner_agency_type,
             saved=saved_examiner_agency(self.current_settings),
             on_change=self.auto_save_settings,
         )
 
-        self.examiner_agency_other = ttk.Entry(examiner_frame)
-        self.examiner_agency_other.grid(row=1, column=1, sticky="ew", pady=2)
-        self.examiner_agency_other.grid_remove()
+        self.examiner_agency_entry = ttk.Entry(examiner_frame)
+        self.examiner_agency_entry.grid(row=1, column=1, sticky="ew", pady=2)
+        self.examiner_agency_entry.grid_remove()
 
         ttk.Label(examiner_frame, text="Examiner Title:").grid(row=2, column=0, sticky="w", pady=2)
-        self.examiner_title = ttk.Combobox(examiner_frame, values=load_request_titles())
-        self.examiner_title.grid(row=2, column=1, sticky="ew", pady=2)
+        self.examiner_title_type = ttk.Combobox(examiner_frame, values=load_request_titles())
+        self.examiner_title_type.grid(row=2, column=1, sticky="ew", pady=2)
         setup_title_combobox(
-            self.examiner_title,
+            self.examiner_title_type,
             saved=self.current_settings.get("examiner_title", ""),
             on_change=self.auto_save_settings,
         )
 
-        self.examiner_title_other = ttk.Entry(examiner_frame)
-        self.examiner_title_other.grid(row=3, column=1, sticky="ew", pady=2)
-        self.examiner_title_other.grid_remove()
+        self.examiner_title_entry = ttk.Entry(examiner_frame)
+        self.examiner_title_entry.grid(row=3, column=1, sticky="ew", pady=2)
+        self.examiner_title_entry.grid_remove()
 
         ttk.Label(examiner_frame, text="Examiner Name:").grid(row=4, column=0, sticky="w", pady=2)
         self.examiner_name = ttk.Entry(examiner_frame)
@@ -370,11 +373,11 @@ class WarrantDataReturns(DndToplevel):
         return
 
     def toggle_examiner_title_other(self, event=None):
-        if self.examiner_title.get() == "Other":
-            self.examiner_title_other.grid()
+        if self.examiner_title_type.get() == "Other":
+            self.examiner_title_entry.grid()
         else:
-            self.examiner_title_other.grid_remove()
-            self.examiner_title_other.delete(0, tk.END)
+            self.examiner_title_entry.grid_remove()
+            self.examiner_title_entry.delete(0, tk.END)
 
     def toggle_time_frame_fields(self):
         if self.time_frame_limited_var.get() == 1:
@@ -685,31 +688,12 @@ class WarrantDataReturns(DndToplevel):
 
     def _perform_auto_save(self):
         try:
-            # Extract ONLY the prefix from the current DFR field
-            current_dfr = self.dfr_number.get().strip()
-            prefix = current_dfr
-
-            # If there's a hyphen, take everything up to and including the hyphen
-            if '-' in current_dfr:
-                prefix = current_dfr.rsplit('-', 1)[0] + '-'
-
-            # Clean and validate prefix
-            prefix = prefix.strip()
-            if not prefix.endswith('-'):
-                prefix += '-'
-
-            # Ensure it's a valid DFR prefix (DFR + year + -)
-            if not (prefix.startswith('DFR') and len(prefix) >= 8 and prefix[3:7].isdigit()):
-                current_year = datetime.now().year
-                prefix = f"DFR{current_year}-"
-
             settings_to_save = {
-                "examiner_agency_type": self.examiner_agency.get(),
+                "examiner_agency_type": self.examiner_agency_type.get(),
                 "examiner_agency_custom": "",
-                "examiner_title": self.examiner_title.get(),
-                "examiner_title_custom": self.examiner_title_other.get() if self.examiner_title.get() == "Other" else "",
+                "examiner_title": self.examiner_title_type.get(),
+                "examiner_title_custom": self.examiner_title_entry.get() if self.examiner_title_type.get() == "Other" else "",
                 "examiner_name": self.examiner_name.get(),
-                "dfr_number_prefix": prefix,  # always just the prefix (e.g. "DFR2026-")
             }
             self.settings_manager.save_settings(settings_to_save)
             self.current_settings.update(settings_to_save)
@@ -751,6 +735,7 @@ class WarrantDataReturns(DndToplevel):
         self.paragraphs = load_paragraphs("warrant")
 
     def generate_paragraphs(self, data, new_doc):
+        prepend_exam_notes(new_doc, self)
         def add(text):
             p = new_doc.add_paragraph(fill_paragraph(text, data))
             for run in p.runs:
@@ -812,12 +797,12 @@ class WarrantDataReturns(DndToplevel):
         missing = []
 
         # Examiner Agency
-        examiner_agency = self.examiner_agency.get().strip()
+        examiner_agency = self.examiner_agency_type.get().strip()
         if not examiner_agency:
             missing.append("Examiner Agency")
 
         # Examiner Title
-        examiner_title = self.examiner_title.get().strip()
+        examiner_title = self.examiner_title_type.get().strip()
         if not examiner_title:
             missing.append("Examiner Title")
 
@@ -837,11 +822,11 @@ class WarrantDataReturns(DndToplevel):
         if role != "Case Agent":
             if not self.request_date.get().strip():
                 missing.append("Request Date")
-            if not self.requesting_agency.get().strip():
+            if not self.request_agency.get().strip():
                 missing.append("Requesting Agency")
-            if not self.requesting_officer_title.get().strip():
+            if not self.request_title_type.get().strip():
                 missing.append("Requesting Officer Title")
-            if not self.requesting_officer.get().strip():
+            if not self.request_officer.get().strip():
                 missing.append("Requesting Officer")
 
         # Primary Case Offense
@@ -891,11 +876,11 @@ class WarrantDataReturns(DndToplevel):
             messagebox.showerror("Error", "No template file selected.")
             return
 
-        examiner_title = self.format_title(self.examiner_title.get())
+        examiner_title = self.format_title(self.examiner_title_type.get())
         examiner_name = self.examiner_name.get().strip().title()
         examiner_value = f"{examiner_title} {examiner_name}".strip()
         examiner_agency, examiner_agency_abbr = self.format_agency(
-            self.examiner_agency.get().strip(), return_abbreviation=True
+            self.examiner_agency_type.get().strip(), return_abbreviation=True
         )
         role = self.role_type.get() if hasattr(self, "role_type") else "Agency Assist"
         if role == "Case Agent":
@@ -905,10 +890,10 @@ class WarrantDataReturns(DndToplevel):
             request_agency_abbr = examiner_agency_abbr
             request_officer_full = examiner_value
         else:
-            request_title = self.format_title(self.requesting_officer_title.get())
-            request_officer = self.requesting_officer.get().strip().title()
+            request_title = self.format_title(self.request_title_type.get())
+            request_officer = self.request_officer.get().strip().title()
             request_agency, request_agency_abbr = self.format_agency(
-                self.requesting_agency.get().strip(), return_abbreviation=True
+                self.request_agency.get().strip(), return_abbreviation=True
             )
             request_officer_full = f"{request_title} {request_officer}".strip()
 
@@ -1044,6 +1029,7 @@ class WarrantDataReturns(DndToplevel):
                 doc.save(final_path)
                 remember_titles_from_form(self)
                 remember_agencies_from_form(self)
+                delete_draft_for_app(self)
                 messagebox.showinfo("Success", f"Report auto-saved to:\n{final_path}")
 
                 # Optional: remember this directory for next time
@@ -1068,6 +1054,7 @@ class WarrantDataReturns(DndToplevel):
                 doc.save(save_path)
                 remember_titles_from_form(self)
                 remember_agencies_from_form(self)
+                delete_draft_for_app(self)
                 messagebox.showinfo("Success", f"Report saved to:\n{save_path}")
 
                 # Remember the chosen directory
@@ -1163,16 +1150,16 @@ class WarrantDataReturns(DndToplevel):
         return ' '.join(word.capitalize() for word in title.split())
 
     def get_request_agency_formatted(self):
-        agency_text = self.requesting_agency.get().strip()
+        agency_text = self.request_agency.get().strip()
         if agency_text:
             return self.format_agency(agency_text)
         return ""
 
     def get_request_title(self):
-        return (self.requesting_officer_title.get() or "").strip()
+        return (self.request_title_type.get() or "").strip()
 
     def get_examiner_agency(self):
-        agency = (self.examiner_agency.get() or "").strip()
+        agency = (self.examiner_agency_type.get() or "").strip()
         if agency == "South Dakota DCI":
             return "South Dakota Division of Criminal Investigation"
         return agency
@@ -1266,4 +1253,4 @@ if __name__ == "__main__":
     app = WarrantDataReturns()
     app.mainloop()
     
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.4) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.0.5) © 2026 #

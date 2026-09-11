@@ -15,6 +15,7 @@ from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from settings_manager import SettingsManager
 from ui_theme import apply_theme, add_header_bar, add_action_bar, pack_right_actions, size_window, build_extracted_info_pane, parse_mdy_date, add_date_entry, COLORS, FormTabs, close_and_return, DndToplevel
 from app_menu import attach_app_menu
+from drafts_manager import add_notes_tab, prepend_exam_notes, delete_draft_for_app
 from paragraphs_manager import fill_paragraph, load_paragraphs
 from report_common import (
     ask_open_file,
@@ -70,6 +71,7 @@ class PCPortableCase(DndToplevel):
         self.master = master
         apply_theme(self)
         attach_app_menu(self)
+        self.report_type = "pc_portable"
         add_header_bar(self, "Computer Portable Case", "TX1, FTK, X-Ways, and Digital Collector image reports")
         self.action_bar = add_action_bar(self)
         self.preview_button = ttk.Button(self.action_bar, text="Preview", command=self.preview_placeholders)
@@ -104,6 +106,7 @@ class PCPortableCase(DndToplevel):
         self.tab_examiner = self.form_tabs.add_tab("examiner", "Examiner Info")
         self.tab_device = self.form_tabs.add_tab("device", "Device Info")
         self.tab_output = self.form_tabs.add_tab("output", "Output Info")
+        add_notes_tab(self, self.form_tabs)
         self.scrollable_frame = self.tab_request
         self.middle_frame = self.tab_device
 
@@ -143,7 +146,7 @@ class PCPortableCase(DndToplevel):
     def bind_tab_status_events(self):
         for name in (
             "request_date", "request_agency", "request_officer", "case_type",
-            "examiner_name", "DFR_Num", "device_owner", "save_location",
+            "examiner_name", "dfr_number", "device_owner", "save_location",
         ):
             widget = getattr(self, name, None)
             if widget is None:
@@ -160,7 +163,7 @@ class PCPortableCase(DndToplevel):
         request_ok = all(self._field_filled(getattr(self, name, None)) for name in (
             "request_date", "request_agency", "request_officer", "case_type"
         ))
-        examiner_ok = self._field_filled(getattr(self, "examiner_name", None)) and is_complete_dfr_number(self.DFR_Num.get() if hasattr(self, "DFR_Num") else "")
+        examiner_ok = self._field_filled(getattr(self, "examiner_name", None)) and is_complete_dfr_number(self.dfr_number.get() if hasattr(self, "dfr_number") else "")
         device_ok = self._field_filled(getattr(self, "device_owner", None))
         try:
             device_ok = device_ok and bool(self.get_selected_forensic_software())
@@ -430,11 +433,11 @@ class PCPortableCase(DndToplevel):
 
         # DFR Report Number
         ttk.Label(examiner_frame, text="DFR Report #:").grid(row=5, column=0, sticky="w", pady=2)
-        self.DFR_Num = ttk.Entry(examiner_frame)
-        self.DFR_Num.grid(row=5, column=1, sticky="ew", pady=2)
+        self.dfr_number = ttk.Entry(examiner_frame)
+        self.dfr_number.grid(row=5, column=1, sticky="ew", pady=2)
         
         # Load saved prefix or use default
-        self.DFR_Num.insert(0, current_dfr_prefix())
+        self.dfr_number.insert(0, current_dfr_prefix())
 
         examiner_frame.columnconfigure(1, weight=1)
 
@@ -473,8 +476,7 @@ class PCPortableCase(DndToplevel):
                 "examiner_agency_custom": "",
                 "examiner_title": examiner_title_value,
                 "examiner_name": self.examiner_name.get(),
-                "dfr_number_prefix": self.get_dfr_prefix(),
-                "version": "1.0.4"
+                "version": "1.0.5"
             }
             
             self.settings_manager.save_settings(settings_to_save)
@@ -486,7 +488,7 @@ class PCPortableCase(DndToplevel):
             print(f"Error auto-saving examiner settings: {e}")
 
     def get_dfr_prefix(self):
-        dfr_value = self.DFR_Num.get()
+        dfr_value = self.dfr_number.get()
         # Find the last occurrence of "DFR" and include everything up to and including any year/dash pattern
         import re
         match = re.match(r'(DFR\d{4}-)', dfr_value)
@@ -893,43 +895,41 @@ class PCPortableCase(DndToplevel):
             return {}
 
     def toggle_request_content(self, event=None):
-        # Clear all request information fields when role is changed
-        if hasattr(self, 'request_date'):
-            self.request_date.delete(0, tk.END)
-        if hasattr(self, 'request_agency'):
-            self.request_agency.delete(0, tk.END)
-        if hasattr(self, 'request_title_type'):
-            self.request_title_type.set("")  # Reset to default
-        if hasattr(self, 'request_title_entry'):
-            self.request_title_entry.delete(0, tk.END)
-            self.request_title_entry.pack_forget()  # Hide custom entry
-        if hasattr(self, 'request_officer'):
-            self.request_officer.delete(0, tk.END)
-        if hasattr(self, 'case_type'):
-            self.case_type.delete(0, tk.END)
-        if hasattr(self, 'legal_authority'):
-            self.legal_authority.set('Search Warrant')  # Reset to default
-        if hasattr(self, 'offense_type'):
-            self.offense_type.delete(0, tk.END)
-        if hasattr(self, 'legal_self'):
-            self.legal_self.set('Search Warrant')  # Reset to default
-        if hasattr(self, 'sw_service_date'):
-            self.sw_service_date.delete(0, tk.END)
-        
-        # Clear time frame fields for both roles
-        if hasattr(self, 'time_frame_var'):
-            self.time_frame_var.set(0)
-        if hasattr(self, 'time_frame_start'):
-            self.time_frame_start.delete(0, tk.END)
-        if hasattr(self, 'time_frame_end'):
-            self.time_frame_end.delete(0, tk.END)
-        if hasattr(self, 'case_agent_time_frame_var'):
-            self.case_agent_time_frame_var.set(0)
-        if hasattr(self, 'case_agent_time_frame_start'):
-            self.case_agent_time_frame_start.delete(0, tk.END)
-        if hasattr(self, 'case_agent_time_frame_end'):
-            self.case_agent_time_frame_end.delete(0, tk.END)
-        
+        if not getattr(self, "_restoring_draft", False):
+            if hasattr(self, 'request_date'):
+                self.request_date.delete(0, tk.END)
+            if hasattr(self, 'request_agency'):
+                self.request_agency.delete(0, tk.END)
+            if hasattr(self, 'request_title_type'):
+                self.request_title_type.set("")
+            if hasattr(self, 'request_title_entry'):
+                self.request_title_entry.delete(0, tk.END)
+                self.request_title_entry.pack_forget()
+            if hasattr(self, 'request_officer'):
+                self.request_officer.delete(0, tk.END)
+            if hasattr(self, 'case_type'):
+                self.case_type.delete(0, tk.END)
+            if hasattr(self, 'legal_authority'):
+                self.legal_authority.set('Search Warrant')
+            if hasattr(self, 'offense_type'):
+                self.offense_type.delete(0, tk.END)
+            if hasattr(self, 'legal_self'):
+                self.legal_self.set('Search Warrant')
+            if hasattr(self, 'sw_service_date'):
+                self.sw_service_date.delete(0, tk.END)
+            if hasattr(self, 'time_frame_var'):
+                self.time_frame_var.set(0)
+            if hasattr(self, 'time_frame_start'):
+                self.time_frame_start.delete(0, tk.END)
+            if hasattr(self, 'time_frame_end'):
+                self.time_frame_end.delete(0, tk.END)
+            if hasattr(self, 'case_agent_time_frame_var'):
+                self.case_agent_time_frame_var.set(0)
+            if hasattr(self, 'case_agent_time_frame_start'):
+                self.case_agent_time_frame_start.delete(0, tk.END)
+            if hasattr(self, 'case_agent_time_frame_end'):
+                self.case_agent_time_frame_end.delete(0, tk.END)
+
         # Portable case is Agency Assist only. Guard leftover Case Agent UI hooks.
         if not hasattr(self, "role_type") or self.role_type is None:
             if hasattr(self, "toggle_time_frame_section"):
@@ -1510,7 +1510,7 @@ class PCPortableCase(DndToplevel):
             "Examiner Title": examiner_title,
             "Examiner Name": self.examiner_name.get(),
             "Case Number": self.case_number.get(),
-            "DFR Number": self.DFR_Num.get() if is_complete_dfr_number(self.DFR_Num.get()) else "",
+            "DFR Number": self.dfr_number.get() if is_complete_dfr_number(self.dfr_number.get()) else "",
         }
 
         # Agency Assist fields (always used now)
@@ -1839,7 +1839,7 @@ class PCPortableCase(DndToplevel):
                 'Forensic_Software': self.get_selected_forensic_software(),
                 'Case_Number': self.case_number.get(),
                 'evidence_ID': self.evidence_number.get(),
-                'DFR_Num': self.DFR_Num.get(),
+                'DFR_Num': self.dfr_number.get(),
                 'source_device': source_device,
                 'device_PCMan': self.device_PCMan.get(),
                 'device_PCMod': self.device_PCMod.get(),
@@ -2138,7 +2138,7 @@ class PCPortableCase(DndToplevel):
         
         # Map search strings to data values
         replacement_map = {
-            "PY_DFR": data.get('DFR_Num', ''),
+            "PY_DFR": (data.get('DFR_Num') or data.get('dfr_number') or self.dfr_number.get()).strip(),
             "PY_CASENUMBER": data.get('Case_Number', ''),
             "PY_EVIDENCE": data.get('evidence_ID', ''),
             "PY_REQDATE": data.get('Request_Date', ''),
@@ -2279,6 +2279,7 @@ class PCPortableCase(DndToplevel):
         return (self.request_title_type.get() or "").strip()
 
     def generate_paragraphs(self, data, new_doc):
+        prepend_exam_notes(new_doc, self)
         def add_paragraph_with_style(doc, text):
             text = fill_paragraph(text, data)
             p = doc.add_paragraph(text)
@@ -2352,7 +2353,7 @@ class PCPortableCase(DndToplevel):
         if not output_filename:
             model = self.device_PCMod.get().strip() if hasattr(self, "device_PCMod") else ""
             output_filename = suggested_report_filename(
-                self.DFR_Num.get().strip(),
+                self.dfr_number.get().strip(),
                 "PCPortable",
                 self.device_owner.get().strip(),
                 model,
@@ -2369,6 +2370,7 @@ class PCPortableCase(DndToplevel):
             doc.save(output_path)
             remember_titles_from_form(self)
             remember_agencies_from_form(self)
+            delete_draft_for_app(self)
             messagebox.showinfo("Success", f"Report generated and saved as:\n{output_path}")
             
         except Exception as e:
@@ -2517,4 +2519,4 @@ class PCPortableCase(DndToplevel):
         close_and_return(self)
 
 
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.4) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.0.5) © 2026 #

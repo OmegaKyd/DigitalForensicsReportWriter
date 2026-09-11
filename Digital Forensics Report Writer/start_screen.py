@@ -150,6 +150,16 @@ class StartScreen(TkinterDnD.Tk):
         app = factory(self)
         self.open_app = app
         app.protocol("WM_DELETE_WINDOW", lambda: self.on_app_close(app))
+        draft = getattr(self, "_pending_draft", None)
+        self._pending_draft = None
+        if draft:
+            def _apply():
+                from drafts_manager import apply_draft
+                try:
+                    apply_draft(app, draft)
+                except Exception as exc:
+                    messagebox.showerror("Open Unfinished Reports", str(exc), parent=app)
+            app.after_idle(_apply)
 
     def launch_mobile_portable_case(self):
         self._launch(MobilePortableCase)
@@ -192,4 +202,4 @@ if __name__ == "__main__":
             print(f"An unexpected error occurred: {e}")
         sys.exit(1)
 
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.4) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.0.5) © 2026 #

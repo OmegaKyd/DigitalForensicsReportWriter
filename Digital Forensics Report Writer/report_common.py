@@ -27,10 +27,8 @@ DEFAULT_AGENCIES = [
 ]
 AGENCY_COMBO_ATTRS = (
     "request_agency",
-    "requesting_agency",
     "transfer_agency",
     "examiner_agency_type",
-    "examiner_agency",
 )
 DEFAULT_REQUEST_TITLES = [
     "Officer",
@@ -127,7 +125,7 @@ def refresh_open_title_comboboxes(root):
         if ident in seen:
             continue
         seen.add(ident)
-        for attr in ("request_title_type", "requesting_officer_title", "examiner_title_type", "examiner_title", "transfer_title"):
+        for attr in ("request_title_type", "examiner_title_type", "transfer_title"):
             box = getattr(widget, attr, None)
             if box is None:
                 continue
@@ -267,7 +265,7 @@ def setup_title_combobox(widget, saved="", on_change=None):
 
 def remember_titles_from_form(app):
     fields = []
-    for attr in ("request_title_type", "requesting_officer_title", "examiner_title_type", "examiner_title", "transfer_title"):
+    for attr in ("request_title_type", "examiner_title_type", "transfer_title"):
         widget = getattr(app, attr, None)
         if widget is None:
             continue
@@ -621,14 +619,33 @@ GUI_PROTECTED_FIELDS = (
 )
 
 def current_dfr_prefix():
-    """Prefix for a new report number, based on the year the program is opened."""
+    """Prefix used when a report number field is first shown."""
+    settings = _settings().load_settings()
+    prefix = str(settings.get("dfr_number_prefix") or "").strip()
+    if prefix:
+        if not prefix.endswith("-"):
+            prefix += "-"
+        return prefix
     return f"DFR{datetime.now().year}-"
 
 
+def save_dfr_prefix(prefix):
+    text = str(prefix or "").strip()
+    if not text:
+        raise ValueError("Report number prefix cannot be blank.")
+    if not text.endswith("-"):
+        text += "-"
+    _settings().save_settings({"dfr_number_prefix": text})
+    return text
+
+
 def is_complete_dfr_number(value):
-    """False when empty or still only the DFRYYYY- prefix."""
+    """False when empty or still only the configured / DFRYYYY- prefix."""
     text = (value or "").strip()
     if not text:
+        return False
+    prefix = current_dfr_prefix().strip()
+    if prefix and text.casefold() in {prefix.casefold(), prefix.rstrip("-").casefold()}:
         return False
     return not bool(re.fullmatch(r"DFR\d{4}-?", text, re.I))
 
@@ -1366,7 +1383,7 @@ def require_device_identity(extraction_data, manufacturer_keys=None, model_keys=
 
 
 PREVIEW_TOKEN_DATA_KEYS = {
-    "PY_DFR": ("DFR_Num", "dfr_num"),
+    "PY_DFR": ("DFR_Num", "dfr_number"),
     "PY_CASENUMBER": ("Case_Number",),
     "PY_EVIDENCE": ("evidence_ID",),
     "PY_REQDATE": ("Request_Date",),
@@ -1406,11 +1423,11 @@ PREVIEW_TOKEN_DATA_KEYS = {
 }
 
 PREVIEW_TOKEN_WIDGETS = {
-    "PY_DFR": ("DFR_Num", "dfr_num", "dfr_number"),
+    "PY_DFR": ("dfr_number",),
     "PY_CASENUMBER": ("case_number",),
     "PY_EVIDENCE": ("evidence_number",),
-    "PY_OWNER": ("device_owner",),
-    "PY_REQAGENCY": ("request_agency", "requesting_agency"),
+    "PY_OWNER": ("device_owner", "account_owner"),
+    "PY_REQAGENCY": ("request_agency",),
     "PY_COLOR": ("device_color",),
     "PY_CAPACITY": ("device_capacity",),
     "PY_ICCID": ("device_iccid",),
@@ -1727,11 +1744,7 @@ def apply_suggested_filename(app, module_label, model=""):
     dfr = ""
     owner = ""
     try:
-        if hasattr(app, "DFR_Num"):
-            dfr = app.DFR_Num.get().strip()
-        elif hasattr(app, "dfr_num"):
-            dfr = app.dfr_num.get().strip()
-        elif hasattr(app, "dfr_number"):
+        if hasattr(app, "dfr_number"):
             dfr = app.dfr_number.get().strip()
     except Exception:
         pass

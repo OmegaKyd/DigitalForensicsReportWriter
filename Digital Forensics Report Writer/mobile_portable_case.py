@@ -15,6 +15,7 @@ from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from settings_manager import SettingsManager
 from ui_theme import apply_theme, add_header_bar, add_action_bar, pack_right_actions, size_window, build_extracted_info_pane, parse_mdy_date, add_date_entry, COLORS, FormTabs, close_and_return, DndToplevel
 from app_menu import attach_app_menu
+from drafts_manager import add_notes_tab, delete_draft_for_app, attach_checklist_document, replace_py_checklist
 from paragraphs_manager import fill_paragraph, load_paragraphs
 from cellebrite_pdf import process_pdf_selection, parse_cellebrite_pdfs_only
 from report_common import (
@@ -68,6 +69,7 @@ class MobilePortableCase(DndToplevel):
         self.master = master
         apply_theme(self)
         attach_app_menu(self)
+        self.report_type = "mobile_portable"
         add_header_bar(self, "Mobile Portable Case", "For Use With Cellebrite and Graykey Extractions")
         self.action_bar = add_action_bar(self)
         self.preview_button = ttk.Button(self.action_bar, text="Preview", command=self.preview_placeholders)
@@ -102,6 +104,7 @@ class MobilePortableCase(DndToplevel):
         self.tab_examiner = self.form_tabs.add_tab("examiner", "Examiner Info")
         self.tab_device = self.form_tabs.add_tab("device", "Device Info")
         self.tab_output = self.form_tabs.add_tab("output", "Output Info")
+        add_notes_tab(self, self.form_tabs, mobile_checklists=True)
         self.scrollable_frame = self.tab_request
         self.middle_frame = self.tab_device
 
@@ -143,7 +146,7 @@ class MobilePortableCase(DndToplevel):
         for name in (
             "request_date", "request_agency", "request_officer", "case_type",
             "examiner_agency_type", "examiner_agency_entry", "examiner_title_type",
-            "examiner_title_entry", "examiner_name", "dfr_num", "device_owner",
+            "examiner_title_entry", "examiner_name", "dfr_number", "device_owner",
             "save_location", "transfer_title", "transfer_officer", "transfer_agency", "transfer_date",
         ):
             widget = getattr(self, name, None)
@@ -165,7 +168,7 @@ class MobilePortableCase(DndToplevel):
             request_ok = request_ok and all(self._field_filled(getattr(self, name, None)) for name in (
                 "transfer_title", "transfer_officer", "transfer_agency", "transfer_date"
             ))
-        examiner_ok = self._field_filled(getattr(self, "examiner_name", None)) and is_complete_dfr_number(self.dfr_num.get() if hasattr(self, "dfr_num") else "")
+        examiner_ok = self._field_filled(getattr(self, "examiner_name", None)) and is_complete_dfr_number(self.dfr_number.get() if hasattr(self, "dfr_number") else "")
         device_ok = self._field_filled(getattr(self, "device_owner", None))
         try:
             device_ok = device_ok and bool(self.get_selected_forensic_software())
@@ -431,11 +434,11 @@ class MobilePortableCase(DndToplevel):
         
         # Digital Forensic Report Number
         ttk.Label(examiner_frame, text="Report Number:").grid(row=5, column=0, sticky="w", pady=2)
-        self.dfr_num = ttk.Entry(examiner_frame)
-        self.dfr_num.grid(row=5, column=1, sticky="ew", pady=2)
+        self.dfr_number = ttk.Entry(examiner_frame)
+        self.dfr_number.grid(row=5, column=1, sticky="ew", pady=2)
        
        # Load saved prefix or use default
-        self.dfr_num.insert(0, current_dfr_prefix())
+        self.dfr_number.insert(0, current_dfr_prefix())
 
         examiner_frame.columnconfigure(1, weight=1)
 
@@ -474,8 +477,7 @@ class MobilePortableCase(DndToplevel):
                 "examiner_agency_custom": "",
                 "examiner_title": examiner_title_value,
                 "examiner_name": self.examiner_name.get(),
-                "dfr_number_prefix": self.get_dfr_prefix(),
-                "version": "1.0.4"
+                "version": "1.0.5"
             }
             
             self.settings_manager.save_settings(settings_to_save)
@@ -487,7 +489,7 @@ class MobilePortableCase(DndToplevel):
             print(f"Error auto-saving examiner settings: {e}")
 
     def get_dfr_prefix(self):
-        dfr_value = self.dfr_num.get()
+        dfr_value = self.dfr_number.get()
         # Find the last occurrence of "DFR" and include everything up to and including any year/dash pattern
         import re
         match = re.match(r'(DFR\d{4}-)', dfr_value)
@@ -1351,7 +1353,7 @@ class MobilePortableCase(DndToplevel):
             "Examiner Name": self.examiner_name.get(),
             # REMOVED: "Case Number": self.case_number.get(),
             # REMOVED: "Evidence Number": self.evidence_number.get(),
-            "DFR Number": self.dfr_num.get() if is_complete_dfr_number(self.dfr_num.get()) else "",
+            "DFR Number": self.dfr_number.get() if is_complete_dfr_number(self.dfr_number.get()) else "",
         }
 
         # Check conditional fields
@@ -1422,7 +1424,7 @@ class MobilePortableCase(DndToplevel):
         for search_string, replacement_doc in search_docs.items():
             if search_string in doc_xml_str:
                 # Special handling for PY_TEXT - multi-paragraph content
-                if search_string == "PY_TEXT":
+                if search_string in ("PY_TEXT", "PY_CHECKLIST"):
                     # Build the complete replacement XML for all paragraphs
                     replacement_xml_parts = []
                     
@@ -1512,7 +1514,7 @@ class MobilePortableCase(DndToplevel):
                 doc_xml_str = doc_xml_str.replace(search_string, replacement_text)
                 replaced_strings[search_string] = True
                 
-                if search_string == "PY_TEXT":
+                if search_string in ("PY_TEXT", "PY_CHECKLIST"):
                     print(f"Replaced '{search_string}' with formatted paragraphs")
                 else:
                     print(f"Replaced '{search_string}' with '{replacement_text[:50]}...'")
@@ -1562,7 +1564,7 @@ class MobilePortableCase(DndToplevel):
                 'Examiner_Title': self.format_title(examiner_title),
                 'Examiner_Name': self.examiner_name.get().title(),
                 'Forensic_Software': self.format_forensic_software_text(),
-                'dfr_num': self.dfr_num.get(),
+                'dfr_num': self.dfr_number.get(),
             }
 
             data.update({
@@ -1603,7 +1605,7 @@ class MobilePortableCase(DndToplevel):
                 return
             data = prefer_gui_over_parsed(data, extraction_data)
             data = apply_preview_overrides_to_data(self, data)
-            data['DFR_Num'] = data.get('DFR_Num') or data.get('dfr_num', '')
+            data['DFR_Num'] = data.get('DFR_Num') or data.get('dfr_num') or data.get('dfr_number') or self.dfr_number.get()
             if preview_only:
                 set_extracted_preview(self, extraction_data, "mobile")
                 suggested = apply_suggested_filename(self, "MobilePortable", data.get("device_model", ""))
@@ -1668,6 +1670,7 @@ class MobilePortableCase(DndToplevel):
             
             # Handle other replacements
             search_docs = {
+                "PY_CHECKLIST": Document(),
                 "PY_DFR": Document(),
                 "PY_CASENUMBER": Document(),
                 "PY_EVIDENCE": Document(),
@@ -1701,6 +1704,8 @@ class MobilePortableCase(DndToplevel):
             
             # Generate replacement content for other fields
             self.generate_replacements(data, search_docs)
+            attach_checklist_document(search_docs, self)
+            replace_py_checklist(doc, self)
             
             # METHOD 2: If PY_TEXT wasn't found in paragraphs, it might be in a content control
             # Try the XML replacement method for remaining placeholders
@@ -1764,7 +1769,7 @@ class MobilePortableCase(DndToplevel):
         
         # Map search strings to data values - ensure all are included
         replacement_map = {
-            "PY_DFR": data.get('dfr_num', ''),
+            "PY_DFR": (data.get('DFR_Num') or data.get('dfr_num') or data.get('dfr_number') or self.dfr_number.get()).strip(),
             "PY_CASENUMBER": data.get('Case_Number', '').strip(),
             "PY_EVIDENCE": data.get('evidence_ID', '').strip(),
             "PY_REQDATE": data.get('Request_Date', ''),
@@ -1801,7 +1806,7 @@ class MobilePortableCase(DndToplevel):
         
         # Create content for each search string
         for search_string, doc in search_docs.items():
-            if search_string == "PY_TEXT":
+            if search_string in ("PY_TEXT", "PY_CHECKLIST"):
                 # Handled by generate_paragraphs
                 para_count = len(doc.paragraphs)
                 print(f"  {search_string}: {para_count} paragraphs already generated")
@@ -1853,7 +1858,7 @@ class MobilePortableCase(DndToplevel):
             print("\nHandling split placeholders...")
             
             # Look for placeholders that might be split by XML tags
-            target_placeholders = [key for key in search_docs.keys() if key != "PY_TEXT"]
+            target_placeholders = [key for key in search_docs.keys() if key not in ("PY_TEXT", "PY_CHECKLIST")]
             
             for search_string in target_placeholders:
                 if replaced_strings[search_string]:
@@ -1953,6 +1958,7 @@ class MobilePortableCase(DndToplevel):
         return (self.request_title_type.get() or "").strip()
 
     def generate_paragraphs(self, data, new_doc):
+        # Mobile notes print with the checklist at PY_CHECKLIST, not in PY_TEXT.
         """
         Modified version that adds blank lines between paragraphs
         """
@@ -2060,7 +2066,7 @@ class MobilePortableCase(DndToplevel):
                 except Exception:
                     model = ""
             output_filename = suggested_report_filename(
-                self.dfr_num.get().strip(),
+                self.dfr_number.get().strip(),
                 "MobilePortable",
                 self.device_owner.get().strip(),
                 model,
@@ -2077,6 +2083,7 @@ class MobilePortableCase(DndToplevel):
             doc.save(output_path)
             remember_titles_from_form(self)
             remember_agencies_from_form(self)
+            delete_draft_for_app(self)
             messagebox.showinfo("Success", f"Report generated and saved as:\n{output_path}")
             
         except Exception as e:
@@ -2223,4 +2230,4 @@ class MobilePortableCase(DndToplevel):
         close_and_return(self)
 
 
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.4) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.0.5) © 2026 #

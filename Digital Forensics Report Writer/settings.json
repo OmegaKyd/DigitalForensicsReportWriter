@@ -4,12 +4,5 @@
   "examiner_title": "",
   "examiner_name": "",
   "dfr_number_prefix": "DFR2026-",
-  "default_service_provider": "",
-  "last_template_dir": "",
-  "last_extraction_dir": "",
-  "last_export_dir": "",
-  "dfr_templates_dir": "C:\\Users\\Investigator\\Desktop\\Digital Forensics Report Writer\\DFR Templates",
-  "remembered_request_titles": [],
-  "remembered_request_agencies": [],
-  "version": "1.0.4"
+  "version": "1.0.5"
 }

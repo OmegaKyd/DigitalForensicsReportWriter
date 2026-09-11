@@ -18,6 +18,7 @@ from docx.oxml import parse_xml
 from lxml import etree
 from ui_theme import apply_theme, add_header_bar, add_action_bar, pack_right_actions, size_window, build_extracted_info_pane, parse_mdy_date, add_date_entry, COLORS, FormTabs, close_and_return, DndToplevel
 from app_menu import attach_app_menu
+from drafts_manager import add_notes_tab, delete_draft_for_app, attach_checklist_document, replace_py_checklist
 from paragraphs_manager import fill_paragraph, load_paragraphs
 from cellebrite_pdf import process_pdf_selection, parse_cellebrite_pdfs_only
 from report_common import (
@@ -71,6 +72,7 @@ class MobileFullExam(DndToplevel):
         self.master = master
         apply_theme(self)
         attach_app_menu(self)
+        self.report_type = "mobile_full"
         add_header_bar(self, "Full Mobile Exam", "For Use With Cellebrite and Graykey Extractions")
         self.action_bar = add_action_bar(self)
         self.preview_button = ttk.Button(self.action_bar, text="Preview", command=self.preview_placeholders)
@@ -106,6 +108,7 @@ class MobileFullExam(DndToplevel):
         self.tab_examiner = self.form_tabs.add_tab("examiner", "Examiner Info")
         self.tab_device = self.form_tabs.add_tab("device", "Device Info")
         self.tab_output = self.form_tabs.add_tab("output", "Output Info")
+        add_notes_tab(self, self.form_tabs, mobile_checklists=True)
         self.scrollable_frame = self.tab_request
         self.middle_frame = self.tab_device
 
@@ -150,7 +153,7 @@ class MobileFullExam(DndToplevel):
                 "role_type", "request_date", "request_agency", "request_officer", "case_type",
                 "offense_type", "legal_self", "sw_service_date", "transfer_title", "transfer_officer",
                 "transfer_agency", "transfer_date", "examiner_agency_type", "examiner_agency_entry",
-                "examiner_title_type", "examiner_title_entry", "examiner_name", "DFR_Num",
+                "examiner_title_type", "examiner_title_entry", "examiner_name", "dfr_number",
                 "device_owner", "output_filename", "save_location",
             )
         ]
@@ -180,7 +183,7 @@ class MobileFullExam(DndToplevel):
                 "transfer_title", "transfer_officer", "transfer_agency", "transfer_date"
             ))
 
-        examiner_ok = self._field_filled(getattr(self, "examiner_name", None)) and is_complete_dfr_number(self.DFR_Num.get() if hasattr(self, "DFR_Num") else "")
+        examiner_ok = self._field_filled(getattr(self, "examiner_name", None)) and is_complete_dfr_number(self.dfr_number.get() if hasattr(self, "dfr_number") else "")
         if getattr(self, "examiner_agency_type", None):
             examiner_ok = examiner_ok and self._field_filled(self.examiner_agency_type)
         if getattr(self, "examiner_title_type", None):
@@ -625,11 +628,11 @@ class MobileFullExam(DndToplevel):
 
         # DFR Report Number
         ttk.Label(examiner_frame, text="Report Number:").grid(row=5, column=0, sticky="w", pady=2)
-        self.DFR_Num = ttk.Entry(examiner_frame)
-        self.DFR_Num.grid(row=5, column=1, sticky="ew", pady=2)
+        self.dfr_number = ttk.Entry(examiner_frame)
+        self.dfr_number.grid(row=5, column=1, sticky="ew", pady=2)
         
         # Load saved prefix or use default
-        self.DFR_Num.insert(0, current_dfr_prefix())
+        self.dfr_number.insert(0, current_dfr_prefix())
 
         examiner_frame.columnconfigure(1, weight=1)
 
@@ -670,8 +673,7 @@ class MobileFullExam(DndToplevel):
                 "examiner_agency_custom": "",
                 "examiner_title": examiner_title_value,
                 "examiner_name": self.examiner_name.get(),
-                "dfr_number_prefix": self.get_dfr_prefix(),
-                "version": "1.0.4"
+                "version": "1.0.5"
             }
             
             self.settings_manager.save_settings(settings_to_save)
@@ -684,7 +686,7 @@ class MobileFullExam(DndToplevel):
 
     def get_dfr_prefix(self):
         """Extract the DFR prefix from the current DFR number field"""
-        dfr_value = self.DFR_Num.get()
+        dfr_value = self.dfr_number.get()
         # Find the last occurrence of "DFR" and include everything up to and including any year/dash pattern
         import re
         match = re.match(r'(DFR\d{4}-)', dfr_value)
@@ -883,6 +885,19 @@ class MobileFullExam(DndToplevel):
 
     def toggle_request_content(self, event=None):
         # Clear all request information fields when role is changed
+        if getattr(self, "_restoring_draft", False):
+            if self.role_type.get() == "Agency Assist":
+                self.agency_assist_frame.pack(fill=tk.X, padx=5, pady=5)
+                self.case_agent_frame.pack_forget()
+                if hasattr(self, 'time_frame_label'):
+                    self.time_frame_label.grid(row=6, column=0, sticky="w", pady=2)
+                    self.time_frame_checkbox_frame.grid(row=6, column=1, sticky="ew", pady=2)
+            else:
+                self.agency_assist_frame.pack_forget()
+                self.case_agent_frame.pack(fill=tk.X, padx=5, pady=5)
+                self.toggle_sw_date()
+                self.toggle_case_time_frame_section()
+            return
         if hasattr(self, 'request_date'):
             self.request_date.delete(0, tk.END)
         if hasattr(self, 'request_agency'):
@@ -1666,7 +1681,7 @@ class MobileFullExam(DndToplevel):
             "Examiner Name": self.examiner_name.get(),
             "Case Number": self.case_number.get(),
             "Evidence Number": self.evidence_number.get(),
-            "DFR Number": self.DFR_Num.get() if is_complete_dfr_number(self.DFR_Num.get()) else "",
+            "DFR Number": self.dfr_number.get() if is_complete_dfr_number(self.dfr_number.get()) else "",
         }
 
         # Check role-specific fields
@@ -1757,7 +1772,7 @@ class MobileFullExam(DndToplevel):
         for search_string, replacement_doc in search_docs.items():
             if search_string in doc_xml_str:
                 # Special handling for PY_TEXT - multi-paragraph content
-                if search_string == "PY_TEXT":
+                if search_string in ("PY_TEXT", "PY_CHECKLIST"):
                     # Build the complete replacement XML for all paragraphs
                     replacement_xml_parts = []
                     
@@ -1847,7 +1862,7 @@ class MobileFullExam(DndToplevel):
                 doc_xml_str = doc_xml_str.replace(search_string, replacement_text)
                 replaced_strings[search_string] = True
                 
-                if search_string == "PY_TEXT":
+                if search_string in ("PY_TEXT", "PY_CHECKLIST"):
                     print(f"Replaced '{search_string}' with formatted paragraphs")
                 else:
                     print(f"Replaced '{search_string}' with '{replacement_text[:50]}...'")
@@ -1881,7 +1896,7 @@ class MobileFullExam(DndToplevel):
             print("\nHandling split placeholders...")
             
             # Look for placeholders that might be split by XML tags
-            target_placeholders = [key for key in search_docs.keys() if key != "PY_TEXT"]
+            target_placeholders = [key for key in search_docs.keys() if key not in ("PY_TEXT", "PY_CHECKLIST")]
             
             for search_string in target_placeholders:
                 if replaced_strings[search_string]:
@@ -2014,7 +2029,7 @@ class MobileFullExam(DndToplevel):
                 'Examiner_Name': self.examiner_name.get().title(),
                 'Case_Number': self.case_number.get().upper(),
                 'evidence_ID': self.evidence_number.get().upper(),
-                'DFR_Num': self.DFR_Num.get().upper(),
+                'DFR_Num': self.dfr_number.get().upper(),
             }
 
             data.update({
@@ -2130,6 +2145,7 @@ class MobileFullExam(DndToplevel):
 
             # Handle other replacements
             search_docs = {
+                "PY_CHECKLIST": Document(),
                 "PY_DFR": Document(),
                 "PY_CASENUMBER": Document(),
                 "PY_EVIDENCE": Document(),
@@ -2163,6 +2179,8 @@ class MobileFullExam(DndToplevel):
 
             # Generate replacement content for other fields
             self.generate_replacements(data, search_docs)
+            attach_checklist_document(search_docs, self)
+            replace_py_checklist(doc, self)
 
             # METHOD 2: If PY_TEXT wasn't found in paragraphs, it might be in a content control
             if not py_text_found:
@@ -2257,7 +2275,7 @@ class MobileFullExam(DndToplevel):
         
         # Map search strings to data values
         replacement_map = {
-            "PY_DFR": data.get('DFR_Num', ''),
+            "PY_DFR": (data.get('DFR_Num') or data.get('dfr_number') or self.dfr_number.get()).strip(),
             "PY_CASENUMBER": data.get('Case_Number', '').strip(),
             "PY_EVIDENCE": data.get('evidence_ID', '').strip(),
             "PY_REQDATE": data.get('Request_Date', ''),
@@ -2294,7 +2312,7 @@ class MobileFullExam(DndToplevel):
         
         # Create content for each search string
         for search_string, doc in search_docs.items():
-            if search_string == "PY_TEXT":
+            if search_string in ("PY_TEXT", "PY_CHECKLIST"):
                 # Handled by generate_paragraphs
                 para_count = len(doc.paragraphs)
                 print(f"  {search_string}: {para_count} paragraphs already generated")
@@ -2382,7 +2400,7 @@ class MobileFullExam(DndToplevel):
             "Examiner Agency": examiner_agency,
             "Examiner Title": examiner_title,
             "Examiner Name": self.examiner_name.get(),
-            "DFR Number": self.DFR_Num.get() if is_complete_dfr_number(self.DFR_Num.get()) else "",
+            "DFR Number": self.dfr_number.get() if is_complete_dfr_number(self.dfr_number.get()) else "",
         }
 
         # Check role-specific fields
@@ -2456,6 +2474,7 @@ class MobileFullExam(DndToplevel):
         return missing_fields
 
     def generate_paragraphs(self, data, new_doc):
+        # Mobile notes print with the checklist at PY_CHECKLIST, not in PY_TEXT.
         def add_paragraph_with_style(doc, text):
             text = fill_paragraph(text, data)
             p = doc.add_paragraph(text)
@@ -2591,7 +2610,7 @@ class MobileFullExam(DndToplevel):
                 except Exception:
                     model = ""
             output_filename = suggested_report_filename(
-                self.DFR_Num.get().strip(),
+                self.dfr_number.get().strip(),
                 "Mobile",
                 self.device_owner.get().strip(),
                 model,
@@ -2608,6 +2627,7 @@ class MobileFullExam(DndToplevel):
             doc.save(output_path)
             remember_titles_from_form(self)
             remember_agencies_from_form(self)
+            delete_draft_for_app(self)
             messagebox.showinfo("Success", f"Report generated and saved as:\n{output_path}")
             
         except Exception as e:
@@ -2765,4 +2785,4 @@ class MobileFullExam(DndToplevel):
         close_and_return(self)
 
 
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.4) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.0.5) © 2026 #
