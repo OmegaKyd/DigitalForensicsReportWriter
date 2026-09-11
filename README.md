@@ -1,6 +1,6 @@
 # Digital Forensics Report Writer
 
-**Version 1.0.3**
+**Version 1.0.4**
 
 Desktop application for writing digital forensic reports from mobile extractions, computer acquisitions, and search-warrant data returns. The examiner fills case fields (or imports them from vendor reports), chooses a Word template, previews the `PY_` placeholders, and writes a completed `.docx` report.
 
@@ -12,11 +12,11 @@ GitHub: [https://github.com/omegakyd](https://github.com/omegakyd)
 
 | Start-screen button | Module | Typical sources | Official template |
 | --- | --- | --- | --- |
-| Mobile — Portable Case | `mobile_portable_case.py` | Cellebrite UFD / Summary / Quick View, GrayKey PDF | `DFR Mobile.docx` |
-| Mobile — Full Exam | `mobile_full_exam.py` | Cellebrite UFD / Summary / Quick View, GrayKey PDF | `DFR Mobile.docx` |
-| PC — Portable Case | `pc_portable_case.py` | TX1, FTK Imager, X-Ways, or Cellebrite Digital Collector log | `DFR Computer.docx` |
-| PC — Full Exam | `pc_full_exam.py` | TX1, FTK Imager, X-Ways, or Cellebrite Digital Collector log | `DFR Computer.docx` |
-| Warrant Data Returns | `sw_data_review.py` | Warrant, subpoena, or service-provider return | `DFR SW Return.docx` |
+| Mobile — Portable Case | `mobile_portable_case.py` | Cellebrite UFD / Summary / Quick View, GrayKey PDF | `DFR Storage (2026).docx` |
+| Mobile — Full Exam | `mobile_full_exam.py` | Cellebrite UFD / Summary / Quick View, GrayKey PDF | `DFR Mobile (2026).docx` |
+| PC — Portable Case | `pc_portable_case.py` | TX1, FTK Imager, X-Ways, or Cellebrite Digital Collector log | `DFR Storage (2026).docx` |
+| PC — Full Exam | `pc_full_exam.py` | TX1, FTK Imager, X-Ways, or Cellebrite Digital Collector log | `DFR Computer (2026).docx` |
+| Warrant Data Returns | `sw_data_review.py` | Warrant, subpoena, or service-provider return | `DFR SW Return (2026).docx` |
 
 Official templates ship in the project `Templates/` folder and are copied into a writable **DFR Templates** folder on first run. Do not edit the files in `Templates/` if you are working from this project tree; customize copies in **DFR Templates** instead.
 
@@ -37,8 +37,13 @@ Official templates ship in the project `Templates/` folder and are copied into a
 - Suggested output names from DFR number, report type, owner, and model
 - Tools menu to add, rename, remove, or relocate templates
 - **Tools → Manage Templates → Restore Official Templates** copies missing packaged `.docx` files back; deleted working copies stay deleted until you restore them
-- Magnet Axiom artifact picker on full mobile and full computer exams (`magnet_artifacts.py` / `magnet_artifacts.json`)
-- Artifact list is limited by device class (mobile vs computer/storage); Cloud and Refined Results appear on both
+- Magnet Axiom artifact picker on Full Mobile Exam, Full Computer Exam, and Warrant Data Returns (`magnet_artifacts.py` / `magnet_artifacts.json`)
+- Optional AXIOM HTML or XML tagged-export drop when Axiom is checked (`axiom_html_report.py`): pre-checks catalog artifacts and Pictures/Videos CP / Child Erotica / Age Difficult boxes from examiner tags
+- Confirmation list shows unique item counts per artifact type and per imported tag; dual-tagged items count once toward the artifact and once on each tag
+- Generated artifact headings are bold and list-indented; each examiner tag gets `Tag:`, `This tag contains N artifacts.`, and `(DEVICE ARTIFACTS)`
+- `PY_EXAMINE` is filled with the Magnet AXIOM version from the loaded HTML/XML export
+- Warrant Data Returns uses the same tabbed form layout as the other report windows
+- Artifact list is limited by device class (mobile vs computer/storage vs warrant/cloud); Cloud and Refined Results appear on mobile and computer classes
 - Help → About includes a clickable GitHub link
 - Help menu listing every supported `PY_` token
 
@@ -131,15 +136,16 @@ Digital Forensics Report Writer/
 ├── agencies_editor.py         # Tools → Edit Agencies
 ├── magnet_artifacts.py        # Magnet Axiom artifact picker
 ├── magnet_artifacts.json      # bundled artifact catalog
+├── axiom_html_report.py       # AXIOM HTML/XML tagged-export parser
 ├── cellebrite_pdf.py          # Cellebrite PDF import
 ├── mobile_*.py / pc_*.py / sw_data_review.py
 ├── Templates/                 # official DFR Word templates (do not edit here)
 ├── assets/                    # Omega.png, icons
 ├── build_exe.py / DFR_Writer.spec
 ├── LICENSE
-├── README.md
-└── RELEASE_NOTES.md
+└── README.md
 ```
+Release notes live in the project root `RELEASE_NOTES.md`.
 
 ## License
 
