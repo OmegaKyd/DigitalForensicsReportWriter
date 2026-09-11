@@ -1,6 +1,6 @@
 # Digital Forensics Report Writer
 
-**Version 1.0.4**
+**Version 1.0.5** (changes since v1.0.4)
 
 Desktop application for writing digital forensic reports from mobile extractions, computer acquisitions, and search-warrant data returns. The examiner fills case fields (or imports them from vendor reports), chooses a Word template, previews the `PY_` placeholders, and writes a completed `.docx` report.
 
@@ -22,6 +22,10 @@ Official templates ship in the project `Templates/` folder and are copied into a
 
 ## Features
 
+- Optional Notes tab; on mobile reports notes print after the checklist at `PY_CHECKLIST`, on other reports they print at the start of `PY_TEXT`
+- Mobile Notes tab Android/iOS prep checklists print to `PY_CHECKLIST` (one list only); `***************` separates the checklist from notes
+- File → Save Progress / Open Unfinished Reports to pause and resume a form; File → Manage Unfinished Reports… deletes drafts without generating; generating a report also deletes that draft
+- Tools → Report Number Prefix… sets the default value filled into the Report Number field
 - Shared dark forensic theme and Omega header across the start screen and report windows
 - Examiner name, title, and agency remembered between sessions
 - Shared, editable officer-title list for requesting officer, examiner, and transfer officer (**Tools → Edit Officer Titles…**)
@@ -46,6 +50,23 @@ Official templates ship in the project `Templates/` folder and are copied into a
 - Artifact list is limited by device class (mobile vs computer/storage vs warrant/cloud); Cloud and Refined Results appear on mobile and computer classes
 - Help → About includes a clickable GitHub link
 - Help menu listing every supported `PY_` token
+
+## What's new in v1.0.5
+
+Compared with v1.0.4:
+
+- Optional Notes tab on every report form
+- Mobile Android / iOS prep checklists print to `PY_CHECKLIST` (one list only)
+- On mobile reports, notes print after the checklist at `PY_CHECKLIST`, separated by `***************`
+- On PC and Warrant reports, notes still print at the start of `PY_TEXT`
+- File → Save Progress, Open Unfinished Reports, and Manage Unfinished Reports…
+- Draft labels use the report number and device/account owner; generating a report deletes that draft
+- Report number, request, and examiner field names are consistent across modules
+- Tools → Report Number Prefix… sets the default Report Number prefix
+- `PY_DFR` fills from the stored report number
+- Official templates are `DFR Mobile.docx`, `DFR Storage.docx`, `DFR Computer.docx`, and `DFR SW Return.docx`
+
+Full detail is in the project-root `RELEASE_NOTES.md`.
 
 ## Requirements
 
@@ -126,6 +147,7 @@ py -3 build_exe.py
 Digital Forensics Report Writer/
 ├── start_screen.py            # launcher
 ├── app_menu.py                # File / Tools / Help
+├── drafts_manager.py          # notes, checklists, unfinished reports
 ├── ui_theme.py                # theme, APP_NAME, APP_VERSION, header bar
 ├── settings_manager.py        # load / save settings
 ├── report_common.py           # placeholders, templates, titles, preview, naming
