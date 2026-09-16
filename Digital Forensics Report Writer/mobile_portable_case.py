@@ -15,7 +15,7 @@ from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from settings_manager import SettingsManager
 from ui_theme import apply_theme, add_header_bar, add_action_bar, pack_right_actions, size_window, build_extracted_info_pane, parse_mdy_date, add_date_entry, COLORS, FormTabs, close_and_return, DndToplevel
 from app_menu import attach_app_menu
-from drafts_manager import add_notes_tab, delete_draft_for_app, attach_checklist_document, replace_py_checklist
+from drafts_manager import add_notes_tab, delete_draft_for_app
 from paragraphs_manager import fill_paragraph, load_paragraphs
 from cellebrite_pdf import process_pdf_selection, parse_cellebrite_pdfs_only
 from report_common import (
@@ -43,6 +43,8 @@ from report_common import (
     remember_titles_from_form,
     setup_agency_combobox,
     remember_agencies_from_form,
+    apply_template_fields,
+    xml_replaceable_search_docs,
     title_agency_words,
     saved_examiner_agency,
     bind_prefix_typeahead,
@@ -477,7 +479,7 @@ class MobilePortableCase(DndToplevel):
                 "examiner_agency_custom": "",
                 "examiner_title": examiner_title_value,
                 "examiner_name": self.examiner_name.get(),
-                "version": "1.0.5"
+                "version": "1.0.6-beta.1"
             }
             
             self.settings_manager.save_settings(settings_to_save)
@@ -558,7 +560,7 @@ class MobilePortableCase(DndToplevel):
     def create_file_upload_frame(self):
         file_frame = ttk.LabelFrame(self.right_frame, text="File Upload", padding="10")
         file_frame.pack(fill=tk.X, padx=5, pady=5)
-        add_template_picker(self, file_frame, preferred="DFR Mobile (2026).docx", keywords=("mobile",))
+        add_template_picker(self, file_frame, preferred="DFR Storage.docx", keywords=("mobile",))
 
         # Extraction File Drag-and-Drop
         self.extraction_drop_label = ttk.Label(file_frame, text="Drag & Drop GrayKey PDF, Cellebrite Summary/Quick View PDF or UFD File — or click to browse",
@@ -1411,6 +1413,7 @@ class MobilePortableCase(DndToplevel):
         Enhanced version that handles multi-paragraph replacements for PY_TEXT
         with proper newline handling
         """
+        search_docs = xml_replaceable_search_docs(doc, search_docs)
         replaced_strings = {}
         
         # Initialize tracking
@@ -1424,7 +1427,7 @@ class MobilePortableCase(DndToplevel):
         for search_string, replacement_doc in search_docs.items():
             if search_string in doc_xml_str:
                 # Special handling for PY_TEXT - multi-paragraph content
-                if search_string in ("PY_TEXT", "PY_CHECKLIST"):
+                if search_string in ("PY_TEXT", "PY_NOTES", "PY_ACQUIRE"):
                     # Build the complete replacement XML for all paragraphs
                     replacement_xml_parts = []
                     
@@ -1514,7 +1517,7 @@ class MobilePortableCase(DndToplevel):
                 doc_xml_str = doc_xml_str.replace(search_string, replacement_text)
                 replaced_strings[search_string] = True
                 
-                if search_string in ("PY_TEXT", "PY_CHECKLIST"):
+                if search_string in ("PY_TEXT", "PY_NOTES", "PY_ACQUIRE"):
                     print(f"Replaced '{search_string}' with formatted paragraphs")
                 else:
                     print(f"Replaced '{search_string}' with '{replacement_text[:50]}...'")
@@ -1672,6 +1675,7 @@ class MobilePortableCase(DndToplevel):
             search_docs = {
                 "PY_CHECKLIST": Document(),
                 "PY_DFR": Document(),
+                "PY_NOTES": Document(),
                 "PY_CASENUMBER": Document(),
                 "PY_EVIDENCE": Document(),
                 "PY_REQDATE": Document(),                
@@ -1700,12 +1704,11 @@ class MobilePortableCase(DndToplevel):
                 "PY_CBVER": Document(),
                 "PY_GKVER": Document(),
                 "PY_EXAMINE": Document(),
+                "PY_EXAMINEVER": Document(),
             }
             
             # Generate replacement content for other fields
             self.generate_replacements(data, search_docs)
-            attach_checklist_document(search_docs, self)
-            replace_py_checklist(doc, self)
             
             # METHOD 2: If PY_TEXT wasn't found in paragraphs, it might be in a content control
             # Try the XML replacement method for remaining placeholders
@@ -1718,6 +1721,7 @@ class MobilePortableCase(DndToplevel):
             
             # Replace remaining placeholders using XML method
             try:
+                apply_template_fields(doc, self, search_docs)
                 replaced_strings = self.search_and_replace_content_controls_simple(doc, search_docs)
                 
                 # Check for any remaining missing placeholders
@@ -1798,6 +1802,7 @@ class MobilePortableCase(DndToplevel):
             "PY_CBVER": data.get('cellebrite_version', ''),
             "PY_GKVER": data.get('GrayKey_OS', ''),
             "PY_EXAMINE": data.get('axiom_version') or getattr(self, "axiom_version", "") or "",
+            "PY_EXAMINEVER": data.get('axiom_version') or getattr(self, "axiom_version", "") or "",
         }
         
         # Debug output
@@ -1806,7 +1811,7 @@ class MobilePortableCase(DndToplevel):
         
         # Create content for each search string
         for search_string, doc in search_docs.items():
-            if search_string in ("PY_TEXT", "PY_CHECKLIST"):
+            if search_string in ("PY_TEXT", "PY_NOTES", "PY_ACQUIRE"):
                 # Handled by generate_paragraphs
                 para_count = len(doc.paragraphs)
                 print(f"  {search_string}: {para_count} paragraphs already generated")
@@ -1844,6 +1849,7 @@ class MobilePortableCase(DndToplevel):
         """
         import re  # Move the import to the top
         
+        search_docs = xml_replaceable_search_docs(doc, search_docs)
         replaced_strings = {}
         
         # Initialize tracking
@@ -1858,7 +1864,7 @@ class MobilePortableCase(DndToplevel):
             print("\nHandling split placeholders...")
             
             # Look for placeholders that might be split by XML tags
-            target_placeholders = [key for key in search_docs.keys() if key not in ("PY_TEXT", "PY_CHECKLIST")]
+            target_placeholders = [key for key in search_docs.keys() if key not in ("PY_TEXT", "PY_NOTES", "PY_ACQUIRE")]
             
             for search_string in target_placeholders:
                 if replaced_strings[search_string]:
@@ -2080,6 +2086,7 @@ class MobilePortableCase(DndToplevel):
         remember_folder("export", save_location)
         output_path = unique_output_path(save_location, output_filename)
         try:
+            apply_template_fields(doc, self, locals().get('search_docs'))
             doc.save(output_path)
             remember_titles_from_form(self)
             remember_agencies_from_form(self)
@@ -2230,4 +2237,4 @@ class MobilePortableCase(DndToplevel):
         close_and_return(self)
 
 
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.5) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.0.6-beta.1) © 2026 #

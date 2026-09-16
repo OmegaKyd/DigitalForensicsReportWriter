@@ -1407,7 +1407,8 @@ PREVIEW_TOKEN_DATA_KEYS = {
     "PY_OS": ("Device_OS",),
     "PY_CBVER": ("cellebrite_version",),
     "PY_GKVER": ("GrayKey_OS",),
-    "PY_EXAMINE": ("axiom_version", "PY_EXAMINE"),
+    "PY_EXAMINE": ("axiom_version", "PY_EXAMINE", "PY_EXAMINEVER"),
+    "PY_EXAMINEVER": ("axiom_version", "PY_EXAMINEVER", "PY_EXAMINE"),
     "PY_DEVMAKE": ("device_PCMan",),
     "PY_DEVMODEL": ("device_PCMod",),
     "PY_PCMAN": ("device_PCMan",),
@@ -1657,7 +1658,8 @@ def mobile_preview_rows(data, officer_text="", image_date=""):
         ("PY_OS", data.get("Device_OS", "")),
         ("PY_CBVER", data.get("cellebrite_version", "")),
         ("PY_GKVER", data.get("GrayKey_OS", "")),
-        ("PY_EXAMINE", data.get("axiom_version", "") or data.get("PY_EXAMINE", "")),
+        ("PY_EXAMINE", data.get("axiom_version", "") or data.get("PY_EXAMINE", "") or data.get("PY_EXAMINEVER", "")),
+        ("PY_EXAMINEVER", data.get("axiom_version", "") or data.get("PY_EXAMINEVER", "") or data.get("PY_EXAMINE", "")),
     ]
 
 
@@ -1770,3 +1772,459 @@ def seed_save_location(app):
         widget.insert(0, default_export_dir())
     except Exception:
         pass
+
+
+W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+W14_NS = "http://schemas.microsoft.com/office/word/2010/wordml"
+
+AUTH_CHECKBOX_TAGS = {
+    "Search Warrant": "AUTH_SW",
+    "Consent": "AUTH_CONSENT",
+    "Implied Consent": "AUTH_IMPLIED",
+    "Parole": "AUTH_PAROLE",
+}
+
+# Working templates may use either the short AUTH_* tags or PY_AUTH* tags.
+AUTH_TAG_ALIASES = {
+    "Search Warrant": ("AUTH_SW", "PY_AUTHSW"),
+    "Consent": ("AUTH_CONSENT", "PY_AUTHCONSENT"),
+    "Implied Consent": ("AUTH_IMPLIED", "PY_AUTHIMPLIED"),
+    "Parole": ("AUTH_PAROLE", "PY_AUTHPAROLE"),
+}
+
+BLOCK_CONTENT_TAGS = ("PY_TEXT", "PY_NOTES", "PY_ACQUIRE", "PY_CHECKLIST")
+TIME_FRAME_YES_TAGS = ("PY_TIMEFRAMEYES",)
+TIME_FRAME_NO_TAGS = ("PY_TIMEFRAMENO",)
+EXTRACTION_YES_TAGS = {
+    "TX1": ("PY_TX1YES",),
+    "FTK": ("PY_FTKYES",),
+    "XWAYS": ("PY_XWYES", "PY_XWAYSYES"),
+    "DC": ("PY_DCYES",),
+}
+PROCESSING_YES_TAGS = {
+    "xways": ("PY_XWPROYES",),
+    "axiom": ("PY_EXAMINEYES",),
+    "griffeye": ("PY_GRIFFEYEYES",),
+    "cellebrite": ("PY_CELLEBRITEYES", "PY_CBYES"),
+    "manual": ("PY_MANUAL", "PY_MANUALYES"),
+}
+
+
+def current_legal_authority(app):
+    role = ""
+    widget = getattr(app, "role_type", None)
+    if widget is not None:
+        try:
+            role = widget.get().strip()
+        except Exception:
+            role = ""
+    if role == "Case Agent":
+        source = getattr(app, "legal_self", None)
+    else:
+        source = getattr(app, "legal_authority", None) or getattr(app, "legal_self", None)
+    if source is None:
+        return ""
+    try:
+        return source.get().strip()
+    except Exception:
+        return ""
+
+
+def authority_checkbox_states(app):
+    selected = current_legal_authority(app)
+    states = {}
+    for label, tags in AUTH_TAG_ALIASES.items():
+        checked = label == selected
+        for tag in tags:
+            states[tag] = checked
+    # Keep the original short names too.
+    for label, tag in AUTH_CHECKBOX_TAGS.items():
+        states[tag] = label == selected
+    return states
+
+
+def time_frame_is_limited(app):
+    role = ""
+    widget = getattr(app, "role_type", None)
+    if widget is not None:
+        try:
+            role = widget.get().strip()
+        except Exception:
+            role = ""
+    if role == "Case Agent":
+        names = ("case_agent_time_frame_var", "case_time_frame_limited_var")
+    else:
+        names = ("time_frame_var", "time_frame_limited_var")
+    for name in names:
+        var = getattr(app, name, None)
+        if var is None:
+            continue
+        try:
+            if int(var.get()) == 1:
+                return True
+        except Exception:
+            continue
+    for name in ("time_frame_var", "time_frame_limited_var", "case_agent_time_frame_var", "case_time_frame_limited_var"):
+        var = getattr(app, name, None)
+        if var is None:
+            continue
+        try:
+            if int(var.get()) == 1:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _intvar_on(app, *names):
+    for name in names:
+        var = getattr(app, name, None)
+        if var is None:
+            continue
+        try:
+            if int(var.get()) == 1:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def processing_checkbox_states(app):
+    selected = {
+        "xways": _intvar_on(app, "xways_var"),
+        "axiom": _intvar_on(app, "axiom_var", "cb_axiom_var"),
+        "griffeye": _intvar_on(app, "griffeye_var", "cb_griffeye_var"),
+        "cellebrite": _intvar_on(app, "cb_cellebrite_var", "cellebrite_var"),
+        "manual": _intvar_on(app, "cb_manual_var", "manual_var"),
+    }
+    states = {}
+    for kind, tags in PROCESSING_YES_TAGS.items():
+        checked = bool(selected.get(kind))
+        for tag in tags:
+            states[tag] = checked
+    return states
+
+
+def extraction_checkbox_states(app):
+    raw = str(getattr(app, "extraction_type", "") or "").strip().upper()
+    if raw in ("X-WAYS", "XWAYS FORENSIC", "X-WAYS FORENSICS"):
+        raw = "XWAYS"
+    states = {}
+    for kind, tags in EXTRACTION_YES_TAGS.items():
+        checked = raw == kind
+        for tag in tags:
+            states[tag] = checked
+    return states
+
+
+def form_checkbox_states(app):
+    states = {}
+    states.update(authority_checkbox_states(app))
+    limited = time_frame_is_limited(app)
+    for tag in TIME_FRAME_YES_TAGS:
+        states[tag] = limited
+    for tag in TIME_FRAME_NO_TAGS:
+        states[tag] = not limited
+    states.update(extraction_checkbox_states(app))
+    states.update(processing_checkbox_states(app))
+    airplane = ""
+    widget = getattr(app, "airplane_mode", None)
+    if widget is not None:
+        try:
+            airplane = widget.get().strip().casefold()
+        except Exception:
+            airplane = ""
+    if airplane:
+        states["PY_AIRPLANEYES"] = airplane in ("yes", "y", "true", "1")
+        states["PY_AIRPLANENO"] = not states["PY_AIRPLANEYES"]
+    try:
+        from drafts_manager import checklist_checkbox_states
+
+        states.update(checklist_checkbox_states(app))
+    except Exception:
+        pass
+    return states
+
+
+def _sdt_attr(element, name):
+    if element is None:
+        return ""
+    return (
+        element.get(f"{{{W_NS}}}{name}")
+        or element.get(f"{{{W14_NS}}}{name}")
+        or element.get(name)
+        or ""
+    ).strip()
+
+
+def _sdt_tag_name(sdt):
+    props = sdt.find(f"{{{W_NS}}}sdtPr")
+    if props is None:
+        return ""
+    tag = props.find(f"{{{W_NS}}}tag")
+    value = _sdt_attr(tag, "val")
+    if value:
+        return value
+    alias = props.find(f"{{{W_NS}}}alias")
+    return _sdt_attr(alias, "val")
+
+
+def _checkbox_glyphs(checkbox):
+    def glyph(child, default):
+        raw = _sdt_attr(child, "val") if child is not None else ""
+        if not raw:
+            return default
+        try:
+            return chr(int(raw, 16))
+        except Exception:
+            return default
+
+    checked = checkbox.find(f"{{{W14_NS}}}checkedState")
+    unchecked = checkbox.find(f"{{{W14_NS}}}uncheckedState")
+    return glyph(checked, "☒"), glyph(unchecked, "☐")
+
+
+def set_sdt_checkbox(sdt, checked):
+    from lxml import etree
+
+    checkbox = sdt.find(f".//{{{W14_NS}}}checkbox")
+    if checkbox is None:
+        return False
+    flag = checkbox.find(f"{{{W14_NS}}}checked")
+    if flag is None:
+        flag = etree.SubElement(checkbox, f"{{{W14_NS}}}checked")
+    flag.set(f"{{{W14_NS}}}val", "1" if checked else "0")
+    on_mark, off_mark = _checkbox_glyphs(checkbox)
+    content = sdt.find(f"{{{W_NS}}}sdtContent")
+    if content is not None:
+        for text_node in content.iter(f"{{{W_NS}}}t"):
+            text_node.text = on_mark if checked else off_mark
+    return True
+
+
+def apply_tagged_checkboxes(doc, states):
+    """Set Word content-control checkboxes whose Tag/Title match *states*."""
+    if doc is None or not states:
+        return 0
+    wanted = {str(name).strip().casefold(): bool(value) for name, value in states.items() if str(name).strip()}
+    if not wanted:
+        return 0
+    changed = 0
+    for sdt in doc._element.iter(f"{{{W_NS}}}sdt"):
+        name = _sdt_tag_name(sdt)
+        if not name or name.casefold() not in wanted:
+            continue
+        if set_sdt_checkbox(sdt, wanted[name.casefold()]):
+            changed += 1
+    return changed
+
+
+def apply_authority_checkboxes(doc, app):
+    """Check authority boxes from the form. Kept for compatibility."""
+    return apply_tagged_checkboxes(doc, authority_checkbox_states(app))
+
+
+def _remove_showing_placeholder(sdt):
+    props = sdt.find(f"{{{W_NS}}}sdtPr")
+    if props is None:
+        return
+    for child in list(props):
+        if child.tag.endswith("showingPlcHdr"):
+            props.remove(child)
+    content = sdt.find(f"{{{W_NS}}}sdtContent")
+    if content is not None:
+        _clear_placeholder_run_style(content)
+
+
+def _clear_placeholder_run_style(container):
+    """Stop filled values from using Word's gray Placeholder Text character style."""
+    for run in container.iter(f"{{{W_NS}}}r"):
+        rpr = run.find(f"{{{W_NS}}}rPr")
+        if rpr is None:
+            continue
+        for child in list(rpr):
+            tag = child.tag.split("}")[-1]
+            if tag == "rStyle":
+                style = (
+                    child.get(f"{{{W_NS}}}val")
+                    or child.get("val")
+                    or ""
+                )
+                if style.casefold() in ("placeholdertext", "placeholder text"):
+                    rpr.remove(child)
+            elif tag == "color":
+                color = (
+                    child.get(f"{{{W_NS}}}val")
+                    or child.get("val")
+                    or ""
+                ).casefold()
+                if color in ("808080", "a6a6a6", "auto"):
+                    rpr.remove(child)
+
+
+def _iter_sdt_text_nodes(container):
+    return list(container.iter(f"{{{W_NS}}}t"))
+
+
+def _force_arial(element):
+    """Make every run Arial 11pt and drop theme fonts that resolve to Calibri."""
+    if element is None:
+        return
+    for run in element.iter(f"{{{W_NS}}}r"):
+        rpr = run.find(f"{{{W_NS}}}rPr")
+        if rpr is None:
+            rpr = OxmlElement("w:rPr")
+            run.insert(0, rpr)
+        rfonts = rpr.find(f"{{{W_NS}}}rFonts")
+        if rfonts is None:
+            rfonts = OxmlElement("w:rFonts")
+            rpr.insert(0, rfonts)
+        for attr in ("ascii", "hAnsi", "cs", "eastAsia"):
+            rfonts.set(f"{{{W_NS}}}{attr}", "Arial")
+        for theme_attr in ("asciiTheme", "hAnsiTheme", "cstheme", "eastAsiaTheme"):
+            key = f"{{{W_NS}}}{theme_attr}"
+            if key in rfonts.attrib:
+                del rfonts.attrib[key]
+        if rpr.find(f"{{{W_NS}}}sz") is None:
+            size = OxmlElement("w:sz")
+            size.set(f"{{{W_NS}}}val", "22")
+            rpr.append(size)
+        if rpr.find(f"{{{W_NS}}}szCs") is None:
+            size_cs = OxmlElement("w:szCs")
+            size_cs.set(f"{{{W_NS}}}val", "22")
+            rpr.append(size_cs)
+
+
+def _set_first_text(container, value):
+    nodes = _iter_sdt_text_nodes(container)
+    if nodes:
+        nodes[0].text = value if value is not None else ""
+        for node in nodes[1:]:
+            node.text = ""
+        _clear_placeholder_run_style(container)
+        _force_arial(container)
+        return True
+    return False
+
+
+def _sdt_content_container(sdt):
+    content = sdt.find(f"{{{W_NS}}}sdtContent")
+    if content is None:
+        return None
+    cell = content.find(f"{{{W_NS}}}tc")
+    return cell if cell is not None else content
+
+
+def _plain_from_doc(replacement_doc):
+    if replacement_doc is None:
+        return ""
+    lines = []
+    for para in getattr(replacement_doc, "paragraphs", []) or []:
+        lines.append(para.text or "")
+    text = "\n".join(lines).strip("\n")
+    return text
+
+
+def _fill_block_sdt(sdt, replacement_doc):
+    from copy import deepcopy
+
+    container = _sdt_content_container(sdt)
+    if container is None:
+        return False
+    _remove_showing_placeholder(sdt)
+    paragraphs = [
+        para
+        for para in list(getattr(replacement_doc, "paragraphs", []) or [])
+        if (para.text or "").strip() or para.runs
+    ]
+    if not paragraphs:
+        _set_first_text(container, "")
+        _force_arial(container)
+        return True
+    existing = [child for child in list(container) if child.tag == f"{{{W_NS}}}p"]
+    for extra in existing:
+        container.remove(extra)
+    insert_after = None
+    for para in paragraphs:
+        clone = deepcopy(para._element)
+        _force_arial(clone)
+        if insert_after is None:
+            container.append(clone)
+        else:
+            insert_after.addnext(clone)
+        insert_after = clone
+    return True
+
+
+def fill_tagged_text_controls(doc, search_docs):
+    """Fill tagged text content controls from the same map used for PY_ tokens."""
+    if doc is None or not search_docs:
+        return 0
+    lookup = {str(key).strip().casefold(): value for key, value in search_docs.items() if str(key).strip()}
+    changed = 0
+    for sdt in doc._element.iter(f"{{{W_NS}}}sdt"):
+        if sdt.find(f".//{{{W14_NS}}}checkbox") is not None:
+            continue
+        name = _sdt_tag_name(sdt)
+        if not name or name.casefold() not in lookup:
+            continue
+        replacement = lookup[name.casefold()]
+        _remove_showing_placeholder(sdt)
+        if name.upper() in BLOCK_CONTENT_TAGS and hasattr(replacement, "paragraphs"):
+            if _fill_block_sdt(sdt, replacement):
+                changed += 1
+            continue
+        text = _plain_from_doc(replacement) if hasattr(replacement, "paragraphs") else str(replacement or "")
+        container = _sdt_content_container(sdt)
+        if container is not None and _set_first_text(container, text):
+            changed += 1
+    return changed
+
+
+def tagged_control_names(doc):
+    names = set()
+    if doc is None:
+        return names
+    for sdt in doc._element.iter(f"{{{W_NS}}}sdt"):
+        name = _sdt_tag_name(sdt)
+        if name:
+            names.add(name.casefold())
+    return names
+
+
+def xml_replaceable_search_docs(doc, search_docs):
+    """Keep PY_ text-token replacement from rewriting tagged content-control names."""
+    if not search_docs:
+        return search_docs
+    tagged = tagged_control_names(doc)
+    if not tagged:
+        return search_docs
+
+    def overlaps_tag(token):
+        name = str(token).strip().casefold()
+        if not name:
+            return True
+        if name in tagged:
+            return True
+        # PY_EXAMINE must not rewrite PY_EXAMINEVER / PY_EXAMINEYES in XML.
+        return any(tag != name and tag.startswith(name) for tag in tagged)
+
+    return {key: value for key, value in search_docs.items() if not overlaps_tag(key)}
+
+
+def apply_template_fields(doc, app, search_docs=None):
+    """Fill tagged controls and check tagged checkboxes. PY_ text tokens stay on their existing path."""
+    docs = dict(search_docs or {})
+    try:
+        from drafts_manager import notes_replacement_document
+
+        docs["PY_NOTES"] = notes_replacement_document(app)
+    except Exception:
+        pass
+    examine = docs.get("PY_EXAMINEVER") or docs.get("PY_EXAMINE")
+    if examine is not None:
+        docs["PY_EXAMINEVER"] = examine
+        docs["PY_EXAMINE"] = examine
+    text_count = fill_tagged_text_controls(doc, docs)
+    box_count = apply_tagged_checkboxes(doc, form_checkbox_states(app))
+    return text_count + box_count

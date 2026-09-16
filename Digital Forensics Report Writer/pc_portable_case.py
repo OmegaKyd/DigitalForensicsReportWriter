@@ -41,6 +41,8 @@ from report_common import (
     remember_titles_from_form,
     setup_agency_combobox,
     remember_agencies_from_form,
+    apply_template_fields,
+    xml_replaceable_search_docs,
     title_agency_words,
     saved_examiner_agency,
     bind_prefix_typeahead,
@@ -476,7 +478,7 @@ class PCPortableCase(DndToplevel):
                 "examiner_agency_custom": "",
                 "examiner_title": examiner_title_value,
                 "examiner_name": self.examiner_name.get(),
-                "version": "1.0.5"
+                "version": "1.0.6-beta.1"
             }
             
             self.settings_manager.save_settings(settings_to_save)
@@ -717,7 +719,7 @@ class PCPortableCase(DndToplevel):
     def create_file_upload_frame(self):
         file_frame = ttk.LabelFrame(self.right_frame, text="File Upload", padding="10")
         file_frame.pack(fill=tk.X, padx=5, pady=5)
-        add_template_picker(self, file_frame, preferred="DFR Computer (2026).docx", keywords=("pc", "storage", "computer"))
+        add_template_picker(self, file_frame, preferred="DFR Storage.docx", keywords=("pc", "storage", "computer"))
 
         # Extraction File Drag-and-Drop
         self.create_extraction_file_ui(file_frame)    
@@ -1393,7 +1395,11 @@ class PCPortableCase(DndToplevel):
             extraction_data['device_serial'] = serial
             self.log_populated_fields.add('device_serial')
 
-        md5_match = re.search(r'MD5 checksum:\s*([a-fA-F0-9]+)', content)
+        md5_match = re.search(
+            r'MD5(?:\s*-\s*Computed hash|\s+Hash|\s+checksum):\s*([a-fA-F0-9]{32})',
+            content,
+            re.IGNORECASE,
+        )
         if md5_match:
             extraction_data['md5_hash'] = md5_match.group(1).strip()
             self.log_populated_fields.add('md5_hash')
@@ -1429,9 +1435,21 @@ class PCPortableCase(DndToplevel):
 
     def parse_ftk_date(self, date_str):
         try:
-            # AccessData/Exterro: "Thu Mar 27 10:10:41 2025" or "Fri Jan  9 12:48:09 2026"
-            date_str = ' '.join(date_str.split())
-            date_obj = datetime.strptime(date_str, '%a %b %d %H:%M:%S %Y')
+            # 4.7: "Thu Mar 27 10:10:41 2025" or "Fri Jan  9 12:48:09 2026"
+            # 8.3: "Tue Sep 15 10:44:34 2026 (2026-09-15T15:44:34Z)"
+            cleaned = re.sub(r'\s*\([^)]*\)', '', date_str or "").strip()
+            date_obj = None
+            for candidate in (cleaned, ' '.join(cleaned.split())):
+                for fmt in ('%a %b %d %H:%M:%S %Y', '%a %b %d %H:%M:%S %Y'):
+                    try:
+                        date_obj = datetime.strptime(candidate, fmt)
+                        break
+                    except ValueError:
+                        continue
+                if date_obj:
+                    break
+            if date_obj is None:
+                raise ValueError(cleaned)
             
             # Format the date for output
             formatted_date = date_obj.strftime("%A, %B %d, %Y at %H:%M")
@@ -1588,6 +1606,7 @@ class PCPortableCase(DndToplevel):
         Enhanced version that handles multi-paragraph replacements for PY_TEXT and PY_ACQUIRE
         with proper newline handling
         """
+        search_docs = xml_replaceable_search_docs(doc, search_docs)
         replaced_strings = {}
         
         # Initialize tracking
@@ -1710,6 +1729,7 @@ class PCPortableCase(DndToplevel):
         """
         import re  # Move the import to the top
         
+        search_docs = xml_replaceable_search_docs(doc, search_docs)
         replaced_strings = {}
         
         # Initialize tracking
@@ -1951,6 +1971,7 @@ class PCPortableCase(DndToplevel):
             
             search_docs = {
                 "PY_DFR": Document(),
+                "PY_NOTES": Document(),
                 "PY_CASENUMBER": Document(),
                 "PY_EVIDENCE": Document(),
                 "PY_REQDATE": Document(),
@@ -1963,8 +1984,6 @@ class PCPortableCase(DndToplevel):
                 "PY_IMAGEDATE": Document(),
                 "PY_DEVMAKE": Document(),
                 "PY_DEVMODEL": Document(),
-                "PY_PCMAN": Document(),
-                "PY_PCMOD": Document(),
                 "PY_PCSERIAL": Document(),
                 "PY_COLOR": Document(),
                 "PY_PASSCODE": Document(),
@@ -1977,6 +1996,7 @@ class PCPortableCase(DndToplevel):
                 "PY_XWVER": Document(),
                 "PY_DCVER": Document(),
                 "PY_EXAMINE": Document(),
+                "PY_EXAMINEVER": Document(),
                 "PY_ACQUIRE": Document(),   
             }
             
@@ -1989,6 +2009,7 @@ class PCPortableCase(DndToplevel):
                 search_docs["PY_TEXT"] = new_doc
             
             try:
+                apply_template_fields(doc, self, search_docs)
                 replaced_strings = self.search_and_replace_content_controls_simple(doc, search_docs)
                 
                 missing_strings = [s for s, replaced in replaced_strings.items() if not replaced]
@@ -2158,20 +2179,14 @@ class PCPortableCase(DndToplevel):
             "PY_HDMODEL": data.get('hd_model', ''),
             "PY_HDSERIAL": data.get('hd_serial', ''),
             "PY_CAPACITY": data.get('Device_Capacity') or data.get('device_capacity', ''),
-            "PY_PCMAN": data.get('device_PCMan', ''),
-            "PY_PCMOD": data.get('device_PCMod', ''),
             "PY_FTKVER": data.get('FTK_OS', ''),
             "PY_TX1VER": data.get('TX1_OS', ''),
             "PY_XWVER": data.get('xways_OS', ''),
             "PY_DCVER": data.get('DC_OS', ''),
             "PY_EXAMINE": data.get('axiom_version') or getattr(self, "axiom_version", "") or "",
+            "PY_EXAMINEVER": data.get('axiom_version') or getattr(self, "axiom_version", "") or "",
         }
 
-        if self.device_type.get() != "Computer":
-            replacement_map.update({
-                "PY_PCMAN": data.get('device_PCMan', ''),
-                "PY_PCMOD": data.get('device_PCMod', ''),
-            })
 
         if self.device_type.get() == "Computer":
             replacement_map.update({
@@ -2184,7 +2199,7 @@ class PCPortableCase(DndToplevel):
         print("\nGenerating replacement content:")
         
         for search_string, doc in search_docs.items():
-            if search_string == "PY_TEXT":
+            if search_string in ("PY_TEXT", "PY_NOTES", "PY_ACQUIRE"):
                 para_count = len(doc.paragraphs) if doc.paragraphs else 0
                 print(f"  {search_string}: {para_count} paragraphs already generated")
                 continue 
@@ -2279,7 +2294,7 @@ class PCPortableCase(DndToplevel):
         return (self.request_title_type.get() or "").strip()
 
     def generate_paragraphs(self, data, new_doc):
-        prepend_exam_notes(new_doc, self)
+        # Notes print at PY_NOTES, not in PY_TEXT.
         def add_paragraph_with_style(doc, text):
             text = fill_paragraph(text, data)
             p = doc.add_paragraph(text)
@@ -2367,6 +2382,7 @@ class PCPortableCase(DndToplevel):
         remember_folder("export", save_location)
         output_path = unique_output_path(save_location, output_filename)
         try:
+            apply_template_fields(doc, self, locals().get('search_docs'))
             doc.save(output_path)
             remember_titles_from_form(self)
             remember_agencies_from_form(self)
@@ -2519,4 +2535,4 @@ class PCPortableCase(DndToplevel):
         close_and_return(self)
 
 
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.5) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.0.6-beta.1) © 2026 #

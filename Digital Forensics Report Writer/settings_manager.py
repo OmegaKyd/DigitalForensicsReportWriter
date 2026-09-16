@@ -34,7 +34,7 @@ class SettingsManager:
             "dfr_templates_dir": "",
             "remembered_request_titles": [],
             "remembered_request_agencies": [],
-            "version": "1.0.5",
+            "version": "1.0.6-beta.1",
         }
 
     def _appdata_dir(self, app_name=None, create=True):
@@ -91,4 +91,4 @@ class SettingsManager:
     def get_settings_file_path(self):
         return str(self.settings_file)
 
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.5) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.0.6-beta.1) © 2026 #

@@ -42,6 +42,8 @@ from report_common import (
     remember_titles_from_form,
     setup_agency_combobox,
     remember_agencies_from_form,
+    apply_template_fields,
+    xml_replaceable_search_docs,
     title_agency_words,
     saved_examiner_agency,
     bind_prefix_typeahead,
@@ -587,7 +589,7 @@ class PCFullExam(DndToplevel):
                 "examiner_agency_custom": "",
                 "examiner_title": examiner_title_value,
                 "examiner_name": self.examiner_name.get(),
-                "version": "1.0.5"
+                "version": "1.0.6-beta.1"
             }
             
             self.settings_manager.save_settings(settings_to_save)
@@ -920,7 +922,7 @@ class PCFullExam(DndToplevel):
     def create_file_upload_frame(self):
         file_frame = ttk.LabelFrame(self.right_frame, text="File Upload", padding="10")
         file_frame.pack(fill=tk.X, padx=5, pady=5)
-        add_template_picker(self, file_frame, preferred="DFR Computer (2026).docx", keywords=("pc", "storage", "computer"))
+        add_template_picker(self, file_frame, preferred="DFR Computer.docx", keywords=("pc", "storage", "computer"))
 
         # Extraction File Drag-and-Drop
         self.create_extraction_file_ui(file_frame)    
@@ -1555,8 +1557,14 @@ class PCFullExam(DndToplevel):
         return extraction_data
     
     def parse_ftk_log(self, content):
+        if re.search(r'Exterro', content, re.IGNORECASE):
+            tool_name = 'Exterro FTK Imager'
+        elif re.search(r'AccessData', content, re.IGNORECASE):
+            tool_name = 'AccessData FTK Imager'
+        else:
+            tool_name = 'FTK Imager'
         extraction_data = {
-            'extraction_tool': 'AccessData FTK Imager',
+            'extraction_tool': tool_name,
             'extraction_type': 'Disk Imaging',  # Default value
         }
         
@@ -1612,7 +1620,11 @@ class PCFullExam(DndToplevel):
             extraction_data['device_serial'] = serial
             self.log_populated_fields.add('device_serial')
         
-        md5_match = re.search(r'MD5 checksum:\s*([a-fA-F0-9]+)', content)
+        md5_match = re.search(
+            r'MD5(?:\s*-\s*Computed hash|\s+Hash|\s+checksum):\s*([a-fA-F0-9]{32})',
+            content,
+            re.IGNORECASE,
+        )
         if md5_match:
             extraction_data['md5_hash'] = md5_match.group(1).strip()
             self.log_populated_fields.add('md5_hash')
@@ -1649,8 +1661,10 @@ class PCFullExam(DndToplevel):
 
     def parse_ftk_date(self, date_str):
         try:
-            # Format: Thu Mar 27 10:10:41 2025
-            date_obj = datetime.strptime(date_str, '%a %b %d %H:%M:%S %Y')
+            # 4.7: Thu Mar 27 10:10:41 2025
+            # 8.3: Tue Sep 15 10:44:34 2026 (2026-09-15T15:44:34Z)
+            cleaned_date = re.sub(r'\s*\([^)]*\)', '', date_str or "").strip()
+            date_obj = datetime.strptime(cleaned_date, '%a %b %d %H:%M:%S %Y')
             
             # Format the date for output
             formatted_date = date_obj.strftime("%A, %B %d, %Y at %H:%M")
@@ -1852,6 +1866,7 @@ class PCFullExam(DndToplevel):
         Enhanced version that handles multi-paragraph replacements for PY_TEXT and PY_ACQUIRE
         with proper newline handling
         """
+        search_docs = xml_replaceable_search_docs(doc, search_docs)
         replaced_strings = {}
         
         # Initialize tracking
@@ -1974,6 +1989,7 @@ class PCFullExam(DndToplevel):
         """
         import re  # Move the import to the top
         
+        search_docs = xml_replaceable_search_docs(doc, search_docs)
         replaced_strings = {}
         
         # Initialize tracking
@@ -2254,6 +2270,7 @@ class PCFullExam(DndToplevel):
             # Handle other replacements
             search_docs = {
                 "PY_DFR": Document(),
+                "PY_NOTES": Document(),
                 "PY_CASENUMBER": Document(),
                 "PY_EVIDENCE": Document(),
                 "PY_REQDATE": Document(),
@@ -2267,8 +2284,6 @@ class PCFullExam(DndToplevel):
 
                 "PY_DEVMAKE": Document(),
                 "PY_DEVMODEL": Document(),
-                "PY_PCMAN": Document(),
-                "PY_PCMOD": Document(),
                 "PY_PCSERIAL": Document(),
                 "PY_COLOR": Document(),
                 "PY_PASSCODE": Document(),
@@ -2283,6 +2298,7 @@ class PCFullExam(DndToplevel):
                 "PY_XWVER": Document(),
                 "PY_DCVER": Document(),
                 "PY_EXAMINE": Document(),
+                "PY_EXAMINEVER": Document(),
                 
                 "PY_ACQUIRE": Document(),   
             }
@@ -2300,6 +2316,7 @@ class PCFullExam(DndToplevel):
             
             # Replace remaining placeholders using XML method
             try:
+                apply_template_fields(doc, self, search_docs)
                 replaced_strings = self.search_and_replace_content_controls_simple(doc, search_docs)
                 
                 # Check for any remaining missing placeholders
@@ -2509,22 +2526,16 @@ class PCFullExam(DndToplevel):
             "PY_HDMODEL": data.get('hd_model', ''),
             "PY_HDSERIAL": data.get('hd_serial', ''),
             "PY_CAPACITY": data.get('Device_Capacity') or data.get('device_capacity', ''),
-            "PY_PCMAN": data.get('device_PCMan', ''),
-            "PY_PCMOD": data.get('device_PCMod', ''),
             
             "PY_FTKVER": data.get('FTK_OS', ''),
             "PY_TX1VER": data.get('TX1_OS', ''),
             "PY_XWVER": data.get('xways_OS', ''),
             "PY_DCVER": data.get('DC_OS', ''),
             "PY_EXAMINE": data.get('axiom_version') or getattr(self, "axiom_version", "") or "",
+            "PY_EXAMINEVER": data.get('axiom_version') or getattr(self, "axiom_version", "") or "",
+            "PY_OSVERSION": data.get('Device_OS') or data.get('device_os') or "",
         }
 
-        # Only add PC-specific replacements for non-computer devices
-        if self.device_type.get() != "Computer":
-            replacement_map.update({
-                "PY_PCMAN": data.get('device_PCMan', ''),
-                "PY_PCMOD": data.get('device_PCMod', ''),
-            })
 
         # Only add hard drive replacements for computer devices
         if self.device_type.get() == "Computer":
@@ -2539,7 +2550,7 @@ class PCFullExam(DndToplevel):
         
         # Create content for each search string
         for search_string, doc in search_docs.items():
-            if search_string == "PY_TEXT":
+            if search_string in ("PY_TEXT", "PY_NOTES", "PY_ACQUIRE"):
                 # These are handled by generate_paragraphs
                 para_count = len(doc.paragraphs) if doc.paragraphs else 0
                 print(f"  {search_string}: {para_count} paragraphs already generated")
@@ -2647,7 +2658,7 @@ class PCFullExam(DndToplevel):
         return (self.request_title_type.get() or "").strip()
 
     def generate_paragraphs(self, data, new_doc):
-        prepend_exam_notes(new_doc, self)
+        # Notes print at PY_NOTES, not in PY_TEXT.
         def add_paragraph_with_style(doc, text):
             text = fill_paragraph(text, data)
             p = doc.add_paragraph(text)
@@ -2832,6 +2843,7 @@ class PCFullExam(DndToplevel):
             counter += 1
         
         try:
+            apply_template_fields(doc, self, locals().get('search_docs'))
             doc.save(output_path)
             remember_titles_from_form(self)
             remember_agencies_from_form(self)
@@ -3019,4 +3031,4 @@ class PCFullExam(DndToplevel):
         close_and_return(self)
 
 
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.5) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.0.6-beta.1) © 2026 #

@@ -52,6 +52,13 @@ WIDGET_ATTRS = (
     "device_carrier",
     "device_model",
     "device_type",
+    "device_type_entry",
+    "device_PCMan",
+    "device_PCMod",
+    "device_PCSerial",
+    "hd_make",
+    "hd_model",
+    "hd_serial",
     "output_filename",
     "save_location",
     "service_provider",
@@ -99,6 +106,8 @@ STATE_ATTRS = (
     "axiom_version",
     "axiom_report_path",
     "extraction_file",
+    "cellebrite_companion_file",
+    "cellebrite_companion_file_2",
     "template_file",
     "multiple_extractions",
     "extraction_type",
@@ -279,7 +288,7 @@ def save_progress(app):
     path = drafts_dir() / draft_filename(report_type, dfr)
     previous = getattr(app, "_draft_path", None)
     with open(path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, ensure_ascii=False)
+        json.dump(payload, handle, indent=2, ensure_ascii=False, default=str)
     if previous and Path(previous).resolve() != path.resolve():
         delete_draft_file(previous)
     app._draft_path = str(path)
@@ -372,8 +381,33 @@ def set_exam_notes(app, text):
         pass
 
 
+def notes_replacement_document(app):
+    """Build the PY_NOTES replacement document from the Notes tab."""
+    from docx import Document
+    from docx.shared import Pt
+
+    doc = Document()
+    text = exam_notes_text(app)
+    if not text:
+        doc.add_paragraph("")
+        return doc
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    wrote = False
+    for line in lines:
+        if not line.strip() and not wrote:
+            continue
+        paragraph = doc.add_paragraph(line)
+        for run in paragraph.runs:
+            run.font.name = "Arial"
+            run.font.size = Pt(11)
+        wrote = True
+    if not wrote:
+        doc.add_paragraph("")
+    return doc
+
+
 def prepend_exam_notes(doc, app):
-    """Write optional examiner notes at the front of the PY_TEXT document."""
+    """Deprecated path: older reports prepended notes to PY_TEXT."""
     from docx.shared import Pt
 
     text = exam_notes_text(app)
@@ -414,12 +448,36 @@ ANDROID_CHECKLIST_ITEMS = (
 
 IOS_CHECKLIST_ITEMS = (
     "Enabled Developer Options",
+    "Turned Off Stolen Device Protection",
     "Trust Computer",
     "Screen Timeout Set to Never",
     "Turned Off Low Power Mode",
     "Turned Off Lock",
     "Entered Recovery Mode",
     "Entered DFU Mode",
+)
+
+ANDROID_CHECKLIST_TAGS = (
+    "PY_ANDROID_DEV",
+    "PY_ANDROID_DEBUG",
+    "PY_ANDROID_AWAKE",
+    "PY_ANDROID_TRANSFER",
+    "PY_ANDROID_VERIFY",
+    "PY_ANDROID_TIMEOUT",
+    "PY_ANDROID_SOURCES",
+    "PY_ANDROID_LOCKOFF",
+    "PY_ANDROID_RECOVERY",
+)
+
+IOS_CHECKLIST_TAGS = (
+    "PY_IOS_DEV",
+    "PY_IOS_SDP",
+    "PY_IOS_TRUST",
+    "PY_IOS_TIMEOUT",
+    "PY_IOS_LOWPOWER",
+    "PY_IOS_LOCKOFF",
+    "PY_IOS_RECOVERY",
+    "PY_IOS_DFU",
 )
 
 CHECK_MARK = "☑"
@@ -435,12 +493,7 @@ def add_notes_tab(app, form_tabs, mobile_checklists=False):
     frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
     ttk.Label(
         frame,
-        text=(
-            "Optional. On mobile reports, notes print after the device checklist at PY_CHECKLIST. "
-            "On other reports, notes print at the start of PY_TEXT."
-            if mobile_checklists
-            else "Optional. If used, these notes print at the start of the report narrative, before the regular paragraphs."
-        ),
+        text="Optional. If used, these notes print at PY_NOTES in the Word template.",
         style="Hint.TLabel",
         wraplength=640,
     ).pack(anchor="w")
@@ -475,7 +528,7 @@ def add_mobile_checklists(app, parent):
     box.pack(fill=tk.X, expand=False, padx=5, pady=(0, 5))
     ttk.Label(
         box,
-        text="Check items from only one list. That list prints at PY_CHECKLIST, with a checked box on selected items.",
+        text="Check items from only one list. Use one list as a prep reminder; notes print at PY_NOTES.",
         style="Hint.TLabel",
         wraplength=640,
     ).pack(anchor="w", pady=(0, 8))
@@ -511,7 +564,7 @@ def add_mobile_checklists(app, parent):
         return variables
 
     build_column(columns, 0, "ANDROID CHECKLIST", ANDROID_CHECKLIST_ITEMS, "android_checklist_vars")
-    build_column(columns, 1, "iOS CHECKLIST", IOS_CHECKLIST_ITEMS, "ios_checklist_vars")
+    build_column(columns, 1, "APPLE iOS CHECKLIST", IOS_CHECKLIST_ITEMS, "ios_checklist_vars")
 
 
 def _enforce_single_checklist(app, changed_attr, current_var):
@@ -530,6 +583,25 @@ def _enforce_single_checklist(app, changed_attr, current_var):
             "Select items from only one checklist (Android or iOS).",
             parent=app,
         )
+
+
+def checklist_checkbox_states(app):
+    """Map Notes-tab Android/iOS checks to the Mobile template tags."""
+    states = {}
+    for tags, attr in (
+        (ANDROID_CHECKLIST_TAGS, "android_checklist_vars"),
+        (IOS_CHECKLIST_TAGS, "ios_checklist_vars"),
+    ):
+        variables = getattr(app, attr, None) or []
+        for index, tag in enumerate(tags):
+            checked = False
+            if index < len(variables):
+                try:
+                    checked = int(variables[index].get()) == 1
+                except Exception:
+                    checked = False
+            states[tag] = checked
+    return states
 
 
 def collect_checklist_state(app):
@@ -570,7 +642,7 @@ def active_checklist(app):
     if android_on and not ios_on:
         return "ANDROID CHECKLIST", ANDROID_CHECKLIST_ITEMS, android_vars
     if ios_on and not android_on:
-        return "iOS CHECKLIST", IOS_CHECKLIST_ITEMS, ios_vars
+        return "APPLE iOS CHECKLIST", IOS_CHECKLIST_ITEMS, ios_vars
     return None, (), ()
 
 

@@ -26,6 +26,8 @@ from report_common import (
     bind_prefix_typeahead,
     refresh_request_title_values,
     apply_warrant_suggested_filename,
+    apply_template_fields,
+    xml_replaceable_search_docs,
 )
 from docx.oxml.ns import qn
 from docx.oxml import parse_xml
@@ -635,7 +637,7 @@ class WarrantDataReturns(DndToplevel):
     def create_template_file_frame(self):
         template_frame = ttk.LabelFrame(self.right_frame, text="Template File", padding=6)
         template_frame.pack(fill=tk.X, expand=False, padx=5, pady=4, anchor="n")
-        add_template_picker(self, template_frame, preferred="DFR SW Return (2026).docx", keywords=("sw", "warrant", "return"))
+        add_template_picker(self, template_frame, preferred="DFR SW Return.docx", keywords=("sw", "warrant", "return"))
          
     def on_template_drop(self, event):
         """Handle drag-and-drop of DFR template file."""
@@ -735,7 +737,7 @@ class WarrantDataReturns(DndToplevel):
         self.paragraphs = load_paragraphs("warrant")
 
     def generate_paragraphs(self, data, new_doc):
-        prepend_exam_notes(new_doc, self)
+        # Notes print at PY_NOTES, not in PY_TEXT.
         def add(text):
             p = new_doc.add_paragraph(fill_paragraph(text, data))
             for run in p.runs:
@@ -949,6 +951,7 @@ class WarrantDataReturns(DndToplevel):
             'Report_Software_List': report_tools,
             'axiom_version': getattr(self, "axiom_version", "") or "",
             'PY_EXAMINE': getattr(self, "axiom_version", "") or "",
+            'PY_EXAMINEVER': getattr(self, "axiom_version", "") or "",
         }
 
         # Optional time frame if checked
@@ -965,7 +968,7 @@ class WarrantDataReturns(DndToplevel):
 
         # Create search docs for replacement
         search_docs = {}
-        for key in ['PY_DFR', 'PY_CASENUMBER', 'PY_EXAMINER', 'PY_EXAMINE', 'PY_REQAGENCY', 'PY_REQOFF', 'PY_SERVEDATE', 'PY_RETURNDATE', 'PY_PROVIDER', 'PY_ACCOUNTID', 'PY_DATASIZE', 'PY_OWNER', 'PY_LIMITSTART', 'PY_LIMITEND']:
+        for key in ['PY_DFR', 'PY_CASENUMBER', 'PY_EXAMINER', 'PY_EXAMINE', 'PY_EXAMINEVER', 'PY_REQAGENCY', 'PY_REQOFF', 'PY_SERVEDATE', 'PY_RETURNDATE', 'PY_PROVIDER', 'PY_ACCOUNTID', 'PY_DATASIZE', 'PY_OWNER', 'PY_LIMITSTART', 'PY_LIMITEND', 'PY_NOTES']:
             search_docs[key] = Document()
             p = search_docs[key].add_paragraph(data.get(key, ''))
             p.style = search_docs[key].styles['Normal']
@@ -975,6 +978,7 @@ class WarrantDataReturns(DndToplevel):
         search_docs['PY_TEXT'] = summary_doc
 
         doc = Document(self.template_file)
+        apply_template_fields(doc, self, search_docs)
         self.search_and_replace_content_controls_simple(doc, search_docs)
         self.search_and_replace_split_placeholders(doc, search_docs)
 
@@ -1026,6 +1030,7 @@ class WarrantDataReturns(DndToplevel):
                         final_path = f"{base}_{i}{ext}"
                         i += 1
 
+                apply_template_fields(doc, self, locals().get('search_docs'))
                 doc.save(final_path)
                 remember_titles_from_form(self)
                 remember_agencies_from_form(self)
@@ -1051,6 +1056,7 @@ class WarrantDataReturns(DndToplevel):
 
         if save_path:
             try:
+                apply_template_fields(doc, self, locals().get('search_docs'))
                 doc.save(save_path)
                 remember_titles_from_form(self)
                 remember_agencies_from_form(self)
@@ -1171,6 +1177,7 @@ class WarrantDataReturns(DndToplevel):
         return self.parse_request_date(date_string)
 
     def search_and_replace_content_controls_simple(self, doc, search_docs):
+        search_docs = xml_replaceable_search_docs(doc, search_docs)
         replaced_strings = {}
         for search_string in search_docs.keys():
             replaced_strings[search_string] = False
@@ -1253,4 +1260,4 @@ if __name__ == "__main__":
     app = WarrantDataReturns()
     app.mainloop()
     
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.5) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.0.6-beta.1) © 2026 #

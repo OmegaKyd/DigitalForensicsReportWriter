@@ -20,56 +20,108 @@ from ui_theme import (
 
 PY_PLACEHOLDERS = [
     ("Case / request", [
-        ("PY_DFR", "DFR number"),
+        ("PY_DFR", "DFR report number"),
         ("PY_CASENUMBER", "Agency or lab case number"),
-        ("PY_REQDATE", "Request date (formatted)"),
-        ("PY_REQOFF", "Requesting officer name"),
-        ("PY_REQAGENCY", "Requesting agency"),
-        ("PY_OWNER", "Device owner (mobile/PC) or account owner (warrant)"),
         ("PY_EVIDENCE", "Evidence number"),
+        ("PY_REQDATE", "Request date"),
+        ("PY_OWNER", "Device owner, or warrant account owner"),
+        ("PY_REQAGENCY", "Requesting / case agency"),
+        ("PY_REQOFF", "Requesting officer or case agent"),
+        ("PY_EXAMINER", "Examiner title and name"),
+        ("PY_IMAGEDATE", "Exam start date and/or image date (same value if tagged twice)"),
     ]),
-    ("Device", [
-        ("PY_MAN / PY_DEVMAKE / PY_PCMAN", "Device or computer manufacturer"),
-        ("PY_MOD / PY_DEVMODEL / PY_PCMOD", "Device or computer model"),
-        ("PY_SERIAL / PY_PCSERIAL", "Device or computer serial number"),
-        ("PY_DEVNAME", "Device name"),
-        ("PY_COLOR", "Device color"),
-        ("PY_OS", "Device operating system"),
-        ("PY_IMEI", "IMEI (first listed)"),
-        ("PY_ICCID", "ICCID (first listed)"),
+    ("Authority and time frame", [
+        ("PY_AUTHCONSENT", "Checked when legal authority is Consent"),
+        ("PY_AUTHSW", "Checked when legal authority is Search Warrant"),
+        ("PY_AUTHIMPLIED", "Checked when legal authority is Implied Consent"),
+        ("PY_AUTHPAROLE", "Checked when legal authority is Parole"),
+        ("PY_AUTHOTHER", "Other-authority text slot (no program field yet)"),
+        ("PY_TIMEFRAMEYES", "Checked when Time Frame Limited is Yes"),
+        ("PY_TIMEFRAMENO", "Checked when Time Frame Limited is No"),
+        ("PY_LIMITSTART", "Time-frame start date"),
+        ("PY_LIMITEND", "Time-frame end date"),
+    ]),
+    ("Mobile / device identity", [
+        ("PY_MAN", "Mobile manufacturer"),
+        ("PY_MOD", "Mobile model"),
+        ("PY_COLOR", "Color"),
         ("PY_PHONE", "Phone number"),
+        ("PY_SERIAL", "Mobile serial number"),
+        ("PY_IMEI", "IMEI (first listed)"),
+        ("PY_CAPACITY", "Capacity"),
+        ("PY_DEVNAME", "Device name"),
+        ("PY_ACCOUNT", "Device account"),
+        ("PY_ICCID", "ICCID (first listed)"),
+        ("PY_PASSCODE", "Passcode text"),
         ("PY_CARRIER", "Carrier"),
-        ("PY_PASSCODE", "Passcode or lock status"),
-        ("PY_CAPACITY", "Storage capacity"),
+        ("PY_OS", "Mobile OS version"),
+        ("PY_AIRPLANEYES", "Checked when Airplane Mode When Received is Yes"),
+        ("PY_AIRPLANENO", "Checked when Airplane Mode When Received is No"),
+    ]),
+    ("Computer / storage identity", [
+        ("PY_DEVMAKE", "Computer or media manufacturer"),
+        ("PY_DEVMODEL", "Computer or media model"),
+        ("PY_PCSERIAL", "Computer serial number"),
+        ("PY_OSVERSION", "Computer OS version"),
         ("PY_HDMAKE", "Hard-drive manufacturer"),
         ("PY_HDMODEL", "Hard-drive model"),
         ("PY_HDSERIAL", "Hard-drive serial"),
     ]),
-    ("Acquisition / software", [
-        ("PY_IMAGEDATE", "Acquisition or image date"),
-        ("PY_ACQUIRE", "Acquisition tool / method text"),
+    ("Acquisition versions and image checkboxes", [
         ("PY_CBVER", "Cellebrite version"),
+        ("PY_CBYES", "Checked when Cellebrite is selected (mobile)"),
         ("PY_GKVER", "GrayKey version"),
-        ("PY_DCVER", "Cellebrite Digital Collector version (PC / Mac acquisitions)"),
         ("PY_FTKVER", "FTK Imager version"),
-        ("PY_TX1VER", "TX1 OS / version"),
+        ("PY_FTKYES", "Checked when the loaded log is FTK"),
+        ("PY_TX1VER", "TX1 version"),
+        ("PY_TX1YES", "Checked when the loaded log is TX1"),
         ("PY_XWVER", "X-Ways version"),
-        ("PY_EXAMINE", "Magnet AXIOM version (from HTML or XML export)"),
+        ("PY_XWYES", "Checked when the loaded log is X-Ways (forensic image)"),
+        ("PY_DCVER", "Digital Collector version"),
+        ("PY_DCYES", "Checked when the loaded log is Digital Collector"),
+        ("PY_ACQUIRE", "Image acquisition log / method text"),
+    ]),
+    ("Processing software", [
+        ("PY_EXAMINEVER", "Magnet AXIOM version from the loaded HTML or XML export"),
+        ("PY_EXAMINE", "Same version text on older templates"),
+        ("PY_EXAMINEYES", "Checked when AXIOM / Magnet Examine is selected"),
+        ("PY_XWPROYES", "Checked when X-Ways processing is selected"),
+        ("PY_GRIFFEYEYES", "Checked when Griffeye is selected"),
+        ("PY_CELLEBRITEYES", "Checked when Cellebrite is selected (warrant)"),
+        ("PY_MANUAL", "Checked when Manual Exam Only is selected (warrant)"),
+        ("PY_MANUALYES", "Same as PY_MANUAL if that tag is used"),
     ]),
     ("Warrant / provider", [
         ("PY_PROVIDER", "Service provider"),
-        ("PY_ACCOUNT / PY_ACCOUNTID", "Account identifier"),
+        ("PY_ACCOUNTID", "Account identifier"),
         ("PY_DATASIZE", "Returned data size"),
-        ("PY_OWNER", "Account owner"),
         ("PY_SERVEDATE", "Warrant service date"),
         ("PY_RETURNDATE", "Data return date"),
-        ("PY_LIMITSTART", "Time-frame start"),
-        ("PY_LIMITEND", "Time-frame end"),
-        ("PY_EXAMINER", "Examiner name"),
     ]),
-    ("Body slots", [
-        ("PY_TEXT", "Inserted narrative paragraphs (Notes tab text first on non-mobile reports)"),
-        ("PY_CHECKLIST", "Mobile checklist, then optional Notes tab text"),
+    ("Narrative", [
+        ("PY_TEXT", "Canned narrative paragraphs"),
+        ("PY_NOTES", "Notes tab text"),
+    ]),
+    ("Android prep checklist", [
+        ("PY_ANDROID_DEV", "Enabled Developer Options"),
+        ("PY_ANDROID_DEBUG", "Enabled USB Debugging"),
+        ("PY_ANDROID_AWAKE", "Set to Stay Awake"),
+        ("PY_ANDROID_TRANSFER", "USB Settings Set to File Transfer or MTP"),
+        ("PY_ANDROID_VERIFY", "Verify Apps Turned Off"),
+        ("PY_ANDROID_TIMEOUT", "Screen Timeout Set to Longest Setting"),
+        ("PY_ANDROID_SOURCES", "Unknown Sources Selected in Developer Options"),
+        ("PY_ANDROID_LOCKOFF", "Turned Lock Off"),
+        ("PY_ANDROID_RECOVERY", "Enabled Recovery Mode"),
+    ]),
+    ("Apple iOS prep checklist", [
+        ("PY_IOS_DEV", "Enabled Developer Options"),
+        ("PY_IOS_SDP", "Turned Off Stolen Device Protection"),
+        ("PY_IOS_TRUST", "Trust Computer"),
+        ("PY_IOS_TIMEOUT", "Screen Timeout Set to Never"),
+        ("PY_IOS_LOWPOWER", "Turned Off Low Power Mode"),
+        ("PY_IOS_LOCKOFF", "Turned Off Lock"),
+        ("PY_IOS_RECOVERY", "Entered Recovery Mode"),
+        ("PY_IOS_DFU", "Entered DFU Mode"),
     ]),
 ]
 
@@ -135,7 +187,8 @@ def attach_app_menu(window, is_start=False):
     menubar.add_cascade(label="Tools", menu=tools_menu)
 
     help_menu = tk.Menu(menubar, tearoff=0)
-    help_menu.add_command(label="Template Placeholders (PY_)...", command=lambda: show_placeholder_guide(window))
+    help_menu.add_command(label="How-To Guide...", command=lambda: open_howto(window))
+    help_menu.add_command(label="Placeholder Index (PY_ tags)...", command=lambda: show_placeholder_guide(window))
     help_menu.add_separator()
     help_menu.add_command(label="About", command=lambda: show_about(window))
     menubar.add_cascade(label="Help", menu=help_menu)
@@ -489,15 +542,64 @@ def show_about(parent):
     win.focus_set()
 
 
+def howto_path():
+    names = (
+        "Digital Forensics Report Writer How-To.docx",
+        "How-To.docx",
+    )
+    roots = []
+    try:
+        roots.append(resource_dir())
+    except Exception:
+        pass
+    try:
+        roots.append(writable_dir())
+    except Exception:
+        pass
+    roots.append(Path(__file__).resolve().parent)
+    roots.append(Path(__file__).resolve().parent.parent)
+    for folder in roots:
+        for name in names:
+            candidate = Path(folder) / name
+            if candidate.is_file():
+                return candidate
+    return None
+
+
+def open_howto(parent):
+    path = howto_path()
+    if path is None:
+        messagebox.showinfo(
+            "How-To Guide",
+            "The How-To document was not found next to the program.\n"
+            "Look for Digital Forensics Report Writer How-To.docx in the project folder.",
+            parent=parent,
+        )
+        return
+    try:
+        if sys.platform.startswith("win"):
+            os.startfile(str(path))
+        else:
+            import subprocess
+            subprocess.Popen(["xdg-open", str(path)])
+    except Exception as exc:
+        messagebox.showerror("How-To Guide", f"Could not open:\n{path}\n\n{exc}", parent=parent)
+
+
 def show_placeholder_guide(parent):
     win = tk.Toplevel(parent)
-    win.title("Template Placeholders")
+    win.title("Placeholder Index")
     win.configure(bg=COLORS["bg"])
-    win.geometry("720x560")
+    win.geometry("780x640")
     ttk.Label(
         win,
-        text="Include these PY_ tokens in new Word templates. They are replaced when a report is generated.",
-        wraplength=680,
+        text=(
+            "Use these names as typed PY_ tokens or as the Tag on a Word content control. "
+            "Tags are preferred. Matching is the full name, so PY_EXAMINE does not fill "
+            "PY_EXAMINEVER or check PY_EXAMINEYES. Official base templates are "
+            "DFR Mobile.docx, DFR Computer.docx, DFR Storage.docx, and DFR SW Return.docx."
+        ),
+        wraplength=740,
     ).pack(anchor="w", padx=12, pady=(12, 6))
     text = tk.Text(
         win,
