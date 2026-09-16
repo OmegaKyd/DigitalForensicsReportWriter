@@ -1,6 +1,6 @@
 # Digital Forensics Report Writer
 
-**Version 1.0.5** (changes since v1.0.4)
+**Version 1.0.6-beta.1** (changes since v1.0.5)
 
 Desktop application for writing digital forensic reports from mobile extractions, computer acquisitions, and search-warrant data returns. The examiner fills case fields (or imports them from vendor reports), chooses a Word template, previews the `PY_` placeholders, and writes a completed `.docx` report.
 
@@ -18,12 +18,12 @@ GitHub: [https://github.com/omegakyd](https://github.com/omegakyd)
 | PC — Full Exam | `pc_full_exam.py` | TX1, FTK Imager, X-Ways, or Cellebrite Digital Collector log | `DFR Computer.docx` |
 | Warrant Data Returns | `sw_data_review.py` | Warrant, subpoena, or service-provider return | `DFR SW Return.docx` |
 
-Official templates ship in the project `Templates/` folder and are copied into a writable **DFR Templates** folder on first run. Do not edit the files in `Templates/` if you are working from this project tree; customize copies in **DFR Templates** instead.
+Official base templates ship in the project `Templates/` folder as `DFR Mobile.docx`, `DFR Computer.docx`, `DFR Storage.docx`, and `DFR SW Return.docx`. They are generic, not agency-specific. On first run they are copied into a writable **DFR Templates** folder. Customize copies there rather than the files in `Templates/`.
 
 ## Features
 
-- Optional Notes tab; on mobile reports notes print after the checklist at `PY_CHECKLIST`, on other reports they print at the start of `PY_TEXT`
-- Mobile Notes tab Android/iOS prep checklists print to `PY_CHECKLIST` (one list only); `***************` separates the checklist from notes
+- Optional Notes tab; notes print at `PY_NOTES`
+- Mobile Notes tab Android / Apple iOS prep checklists check tagged boxes on the official base template (`PY_ANDROID_*`, `PY_IOS_*`)
 - File → Save Progress / Open Unfinished Reports to pause and resume a form; File → Manage Unfinished Reports… deletes drafts without generating; generating a report also deletes that draft
 - Tools → Report Number Prefix… sets the default value filled into the Report Number field
 - Shared dark forensic theme and Omega header across the start screen and report windows
@@ -45,26 +45,23 @@ Official templates ship in the project `Templates/` folder and are copied into a
 - Optional AXIOM HTML or XML tagged-export drop when Axiom is checked (`axiom_html_report.py`): pre-checks catalog artifacts and Pictures/Videos CP / Child Erotica / Age Difficult boxes from examiner tags
 - Confirmation list shows unique item counts per artifact type and per imported tag; dual-tagged items count once toward the artifact and once on each tag
 - Generated artifact headings are bold and list-indented; each examiner tag gets `Tag:`, `This tag contains N artifacts.`, and `(DEVICE ARTIFACTS)`
-- `PY_EXAMINE` is filled with the Magnet AXIOM version from the loaded HTML/XML export
+- `PY_EXAMINEVER` is filled with the Magnet AXIOM version from the loaded HTML/XML export (`PY_EXAMINE` still works on older templates)
 - Warrant Data Returns uses the same tabbed form layout as the other report windows
 - Artifact list is limited by device class (mobile vs computer/storage vs warrant/cloud); Cloud and Refined Results appear on mobile and computer classes
 - Help → About includes a clickable GitHub link
 - Help menu listing every supported `PY_` token
 
-## What's new in v1.0.5
+## What's new in v1.0.6-beta.1
 
-Compared with v1.0.4:
+Compared with v1.0.5:
 
-- Optional Notes tab on every report form
-- Mobile Android / iOS prep checklists print to `PY_CHECKLIST` (one list only)
-- On mobile reports, notes print after the checklist at `PY_CHECKLIST`, separated by `***************`
-- On PC and Warrant reports, notes still print at the start of `PY_TEXT`
-- File → Save Progress, Open Unfinished Reports, and Manage Unfinished Reports…
-- Draft labels use the report number and device/account owner; generating a report deletes that draft
-- Report number, request, and examiner field names are consistent across modules
-- Tools → Report Number Prefix… sets the default Report Number prefix
-- `PY_DFR` fills from the stored report number
-- Official templates are `DFR Mobile.docx`, `DFR Storage.docx`, `DFR Computer.docx`, and `DFR SW Return.docx`
+- Working templates can use Word content-control **Tags** in addition to typed `PY_` tokens
+- Notes print at `PY_NOTES` instead of `PY_TEXT` / `PY_CHECKLIST`
+- Authority, time-frame, acquisition-log, and processing checkboxes follow tagged controls
+- Mobile Android / Apple iOS prep checklists map to `PY_ANDROID_*` and `PY_IOS_*` (includes Stolen Device Protection)
+- FTK Imager 8.3.0.27 logs parse the same fields as 4.7
+- Axiom version fills `PY_EXAMINEVER` (and `PY_EXAMINE` on older templates)
+- Help → Template Placeholders lists the current tag index
 
 Full detail is in the project-root `RELEASE_NOTES.md`.
 
