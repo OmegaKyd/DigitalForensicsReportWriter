@@ -1,6 +1,6 @@
 # Digital Forensics Report Writer
 
-**Version 1.0.6-beta.1** (changes since v1.0.5)
+**Version 1.0.6-beta.1** (changes since v1.0.5-beta.1)
 
 Desktop application for writing digital forensic reports from mobile extractions, computer acquisitions, and search-warrant data returns. The examiner fills case fields (or imports them from vendor reports), chooses a Word template, previews the `PY_` placeholders, and writes a completed `.docx` report.
 
