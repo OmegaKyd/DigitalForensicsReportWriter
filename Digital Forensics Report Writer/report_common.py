@@ -11,6 +11,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from docx.oxml import OxmlElement
+
 from settings_manager import SettingsManager
 from ui_theme import COLORS, parse_mdy_date, resource_dir, writable_dir
 
@@ -2132,11 +2134,15 @@ def _fill_block_sdt(sdt, replacement_doc):
     if container is None:
         return False
     _remove_showing_placeholder(sdt)
-    paragraphs = [
-        para
-        for para in list(getattr(replacement_doc, "paragraphs", []) or [])
-        if (para.text or "").strip() or para.runs
-    ]
+    paragraphs = list(getattr(replacement_doc, "paragraphs", []) or [])
+    # python-docx starts a new Document() with one empty paragraph. Drop only that
+    # unused first paragraph so intentional blank lines between artifacts remain.
+    if (
+        len(paragraphs) > 1
+        and not (paragraphs[0].text or "").strip()
+        and not paragraphs[0].runs
+    ):
+        paragraphs = paragraphs[1:]
     if not paragraphs:
         _set_first_text(container, "")
         _force_arial(container)
