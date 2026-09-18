@@ -1,8 +1,16 @@
 {
-  "examiner_agency_type": "",
+  "examiner_agency_type": "South Dakota DCI",
   "examiner_agency_custom": "",
-  "examiner_title": "",
-  "examiner_name": "",
+  "examiner_title": "Special Agent",
+  "examiner_name": "Shane Hardie",
   "dfr_number_prefix": "DFR2026-",
+  "default_service_provider": "",
+  "last_template_dir": "",
+  "last_extraction_dir": "C:/Users/ghost/Desktop/DFR Report Writer (Old)/Extraction Files",
+  "last_export_dir": "C:\\Users\\ghost\\Desktop",
+  "dfr_templates_dir": "C:\\Users\\ghost\\Desktop\\Digital Forensics Report Writer\\DFR Templates",
+  "remembered_request_titles": [],
+  "remembered_request_agencies": [],
+  "remembered_service_providers": [],
   "version": "1.0.6-beta.1"
 }

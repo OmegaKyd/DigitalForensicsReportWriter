@@ -305,6 +305,14 @@ def organize_selected(selected_artifacts):
     return organized
 
 
+ARTIFACT_HEADING_STYLE = "DFRArtifactHeading"
+W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+
+def _qn(name):
+    return f"{{{W_NS}}}{name}"
+
+
 def _artifact_run(paragraph, text, bold=False, underline=False):
     from docx.oxml.ns import qn
     from docx.shared import Pt
@@ -323,17 +331,210 @@ def _artifact_run(paragraph, text, bold=False, underline=False):
     return run
 
 
-def _artifact_paragraph(doc, text, bold=False, underline=False, indent=0.25):
+def _artifact_paragraph(doc, text, bold=False, underline=False, indent=0, heading=False):
+    from docx.oxml import OxmlElement
     from docx.shared import Inches, Pt
 
     paragraph = doc.add_paragraph()
     paragraph.style = doc.styles["Normal"]
-    paragraph.paragraph_format.left_indent = Inches(indent)
+    paragraph.paragraph_format.left_indent = Inches(indent or 0)
     paragraph.paragraph_format.first_line_indent = Inches(0)
     paragraph.paragraph_format.space_before = Pt(0)
-    paragraph.paragraph_format.space_after = Pt(4)
+    paragraph.paragraph_format.space_after = Pt(0)
+    paragraph.paragraph_format.line_spacing = 1.0
+    if heading:
+        mark_id = str(8000 + len(list(doc.element.body.iter(_qn("bookmarkStart")))))
+        ppr = paragraph._p.get_or_add_pPr()
+        style = OxmlElement("w:pStyle")
+        style.set(_qn("val"), ARTIFACT_HEADING_STYLE)
+        existing = ppr.find(_qn("pStyle"))
+        if existing is not None:
+            ppr.remove(existing)
+        ppr.insert(0, style)
+        start = OxmlElement("w:bookmarkStart")
+        start.set(_qn("id"), mark_id)
+        start.set(_qn("name"), f"DFRArtifact{mark_id}")
+        end = OxmlElement("w:bookmarkEnd")
+        end.set(_qn("id"), mark_id)
+        paragraph._p.insert(0, start)
+        paragraph._p.append(end)
     _artifact_run(paragraph, text, bold=bold, underline=underline)
     return paragraph
+
+
+def _paragraph_plain_text(element):
+    parts = []
+    for node in element.iter(_qn("t")):
+        parts.append(node.text or "")
+    return "".join(parts).strip()
+
+
+def _run_has_tag(rpr, tag):
+    if rpr is None:
+        return False
+    child = rpr.find(_qn(tag))
+    if child is None:
+        return False
+    val = (child.get(_qn("val")) or "true").strip().lower()
+    return val not in {"0", "false", "off"}
+
+
+def is_artifact_heading_element(element):
+    """True only for titles marked when the artifact list was written."""
+    if element is None or not str(getattr(element, "tag", "")).endswith("}p"):
+        return False
+    for child in element.iter(_qn("bookmarkStart")):
+        name = child.get(_qn("name")) or ""
+        if name.startswith("DFRArtifact"):
+            return True
+    ppr = element.find(_qn("pPr"))
+    if ppr is None:
+        return False
+    style = ppr.find(_qn("pStyle"))
+    return style is not None and (style.get(_qn("val")) or "") == ARTIFACT_HEADING_STYLE
+
+
+def _numbering_root(doc):
+    try:
+        return doc.part.numbering_part._element
+    except Exception:
+        return None
+
+
+def _max_attr(root, tag, attr):
+    highest = 0
+    for child in root.findall(_qn(tag)):
+        try:
+            highest = max(highest, int(child.get(_qn(attr)) or 0))
+        except (TypeError, ValueError):
+            pass
+    return highest
+
+
+def ensure_artifact_numbering(doc):
+    """Add a decimal numbered list to the destination document and return its numId."""
+    from docx.oxml import OxmlElement
+
+    root = _numbering_root(doc)
+    if root is None:
+        return None
+    for abstract in root.findall(_qn("abstractNum")):
+        name = abstract.find(_qn("name"))
+        if name is not None and name.get(_qn("val")) == "DFR Artifact List":
+            abstract_id = abstract.get(_qn("abstractNumId"))
+            for num in root.findall(_qn("num")):
+                pointer = num.find(_qn("abstractNumId"))
+                if pointer is not None and pointer.get(_qn("val")) == abstract_id:
+                    try:
+                        return int(num.get(_qn("numId")))
+                    except (TypeError, ValueError):
+                        continue
+    abstract_id = _max_attr(root, "abstractNum", "abstractNumId") + 1
+    num_id = _max_attr(root, "num", "numId") + 1
+
+    abstract = OxmlElement("w:abstractNum")
+    abstract.set(_qn("abstractNumId"), str(abstract_id))
+    name = OxmlElement("w:name")
+    name.set(_qn("val"), "DFR Artifact List")
+    abstract.append(name)
+    multi = OxmlElement("w:multiLevelType")
+    multi.set(_qn("val"), "singleLevel")
+    abstract.append(multi)
+    lvl = OxmlElement("w:lvl")
+    lvl.set(_qn("ilvl"), "0")
+    start = OxmlElement("w:start")
+    start.set(_qn("val"), "1")
+    lvl.append(start)
+    fmt = OxmlElement("w:numFmt")
+    fmt.set(_qn("val"), "decimal")
+    lvl.append(fmt)
+    text = OxmlElement("w:lvlText")
+    text.set(_qn("val"), "%1.")
+    lvl.append(text)
+    align = OxmlElement("w:lvlJc")
+    align.set(_qn("val"), "left")
+    lvl.append(align)
+    ppr = OxmlElement("w:pPr")
+    ind = OxmlElement("w:ind")
+    ind.set(_qn("left"), "720")
+    ind.set(_qn("hanging"), "360")
+    ppr.append(ind)
+    lvl.append(ppr)
+    rpr = OxmlElement("w:rPr")
+    rfonts = OxmlElement("w:rFonts")
+    rfonts.set(_qn("ascii"), "Arial")
+    rfonts.set(_qn("hAnsi"), "Arial")
+    rpr.append(rfonts)
+    sz = OxmlElement("w:sz")
+    sz.set(_qn("val"), "22")
+    rpr.append(sz)
+    lvl.append(rpr)
+    abstract.append(lvl)
+
+    first_num = root.find(_qn("num"))
+    if first_num is not None:
+        first_num.addprevious(abstract)
+    else:
+        root.append(abstract)
+
+    num = OxmlElement("w:num")
+    num.set(_qn("numId"), str(num_id))
+    pointer = OxmlElement("w:abstractNumId")
+    pointer.set(_qn("val"), str(abstract_id))
+    num.append(pointer)
+    root.append(num)
+    return num_id
+
+
+def apply_artifact_list_numbering(doc):
+    """Turn artifact titles into one Word numbered list on the destination document."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    if doc is None:
+        return 0
+    body = getattr(getattr(doc, "element", None), "body", None)
+    if body is None:
+        return 0
+    headings = [element for element in body.iter(_qn("p")) if is_artifact_heading_element(element)]
+    if not headings:
+        return 0
+    num_id = ensure_artifact_numbering(doc)
+    if not num_id:
+        return 0
+    changed = 0
+    for element in headings:
+        ppr = element.find(_qn("pPr"))
+        if ppr is None:
+            ppr = OxmlElement("w:pPr")
+            element.insert(0, ppr)
+        for child in list(ppr):
+            if child.tag == _qn("numPr"):
+                ppr.remove(child)
+        num_pr = OxmlElement("w:numPr")
+        ilvl = OxmlElement("w:ilvl")
+        ilvl.set(qn("w:val"), "0")
+        nid = OxmlElement("w:numId")
+        nid.set(qn("w:val"), str(num_id))
+        num_pr.append(ilvl)
+        num_pr.append(nid)
+        ppr.append(num_pr)
+        ind = ppr.find(_qn("ind"))
+        if ind is None:
+            ind = OxmlElement("w:ind")
+            ppr.append(ind)
+        ind.set(_qn("left"), "720")
+        ind.set(_qn("hanging"), "360")
+        spacing = ppr.find(_qn("spacing"))
+        if spacing is None:
+            spacing = OxmlElement("w:spacing")
+            ppr.append(spacing)
+        spacing.set(_qn("before"), "0")
+        spacing.set(_qn("after"), "0")
+        spacing.set(_qn("line"), "240")
+        spacing.set(_qn("lineRule"), "auto")
+        changed += 1
+    return changed
 
 
 def _tags_for_artifact(artifact, info, report_tags):
@@ -381,49 +582,48 @@ def _tag_item_count(label, tag_counts):
     return None
 
 
-def _write_device_artifacts_block(doc, label, tag_counts, indent):
+def _blank_line(doc):
+    doc.add_paragraph()
+
+
+def _write_device_artifacts_block(doc, label, tag_counts, indent=0):
     count = _tag_item_count(label, tag_counts)
     if count is not None:
         noun = "artifact" if count == 1 else "artifacts"
-        _artifact_paragraph(doc, f"This tag contains {count} {noun}.", indent=indent)
-        doc.add_paragraph()
-    _artifact_paragraph(doc, "(DEVICE ARTIFACTS)", indent=indent)
-    doc.add_paragraph()
-    doc.add_paragraph()
+        _artifact_paragraph(doc, f"This tag contains {count} {noun}.", indent=0)
+        _blank_line(doc)
+    _artifact_paragraph(doc, "(DEVICE ARTIFACTS)", indent=0)
+    _blank_line(doc)
+    _blank_line(doc)
 
 
 def write_artifact_paragraphs(doc, selected_artifacts, style="mobile", preferred_platforms=None, sources=None, report_tags=None, tag_counts=None):
     organized = organize_selected(selected_artifacts)
     if not organized:
         return
-    counter = 1
-    body_indent = 0.5
-    title_indent = 0.25
     for artifact in organized:
         info = lookup_artifact(artifact, preferred_platforms=preferred_platforms, sources=sources)
         is_media_subtag = artifact.startswith("Pictures -- ") or artifact.startswith("Videos -- ")
         tag_labels = _tags_for_artifact(artifact, info, report_tags)
         if not is_media_subtag:
-            title = f"{counter}) {artifact.upper()}"
-            _artifact_paragraph(doc, title, bold=True, indent=title_indent)
-            doc.add_paragraph()
-            _artifact_paragraph(doc, info["description"], indent=body_indent)
-            doc.add_paragraph()
+            _artifact_paragraph(doc, artifact.upper(), bold=True, heading=True)
+            _blank_line(doc)
+            _artifact_paragraph(doc, info["description"], indent=0)
+            _blank_line(doc)
             for label in tag_labels:
-                _artifact_paragraph(doc, f"Tag: {label}", underline=True, indent=body_indent)
-                doc.add_paragraph()
-                _write_device_artifacts_block(doc, label, tag_counts, body_indent)
-            counter += 1
+                _artifact_paragraph(doc, f"Tag: {label}", underline=True, indent=0)
+                _blank_line(doc)
+                _write_device_artifacts_block(doc, label, tag_counts)
         else:
             first = True
             for label in tag_labels:
-                _artifact_paragraph(doc, f"Tag: {label}", underline=True, indent=title_indent)
-                doc.add_paragraph()
+                _artifact_paragraph(doc, f"Tag: {label}", underline=True, indent=0)
+                _blank_line(doc)
                 if first:
-                    _artifact_paragraph(doc, info["description"], indent=body_indent)
-                    doc.add_paragraph()
+                    _artifact_paragraph(doc, info["description"], indent=0)
+                    _blank_line(doc)
                     first = False
-                _write_device_artifacts_block(doc, label, tag_counts, body_indent)
+                _write_device_artifacts_block(doc, label, tag_counts)
 
 
 def open_artifact_picker(parent, device_class="mobile", device_type=None, previously_selected=None, sources=None):

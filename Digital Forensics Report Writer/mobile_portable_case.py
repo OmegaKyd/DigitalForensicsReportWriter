@@ -49,6 +49,7 @@ from report_common import (
     saved_examiner_agency,
     bind_prefix_typeahead,
     refresh_request_title_values,
+    prepare_block_document,
 )
 from docx.oxml.ns import qn
 from docx.oxml import parse_xml
@@ -1968,7 +1969,7 @@ class MobilePortableCase(DndToplevel):
         """
         Modified version that adds blank lines between paragraphs
         """
-        def add_paragraph_with_style(doc, text, add_blank_after=True):
+        def add_paragraph_with_style(doc, text, add_blank_after=False):
             # Split text by newlines to create separate paragraphs
             text = fill_paragraph(text, data)
             text_parts = text.split('\n')
@@ -2060,6 +2061,7 @@ class MobilePortableCase(DndToplevel):
         
         # Add Paragraph Ten (last paragraph - no blank line after)
         add_paragraph_with_style(new_doc, self.paragraphs['ten'], add_blank_after=False)
+        prepare_block_document(new_doc, blank_between=False)
     
     def save_document(self, doc):
         output_filename = self.output_filename.get().strip()

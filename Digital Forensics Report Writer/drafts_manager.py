@@ -385,11 +385,12 @@ def notes_replacement_document(app):
     """Build the PY_NOTES replacement document from the Notes tab."""
     from docx import Document
     from docx.shared import Pt
+    from report_common import prepare_block_document, single_space_paragraph
 
     doc = Document()
     text = exam_notes_text(app)
     if not text:
-        doc.add_paragraph("")
+        single_space_paragraph(doc.add_paragraph(""))
         return doc
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     wrote = False
@@ -400,9 +401,12 @@ def notes_replacement_document(app):
         for run in paragraph.runs:
             run.font.name = "Arial"
             run.font.size = Pt(11)
+        single_space_paragraph(paragraph)
         wrote = True
     if not wrote:
-        doc.add_paragraph("")
+        single_space_paragraph(doc.add_paragraph(""))
+    else:
+        prepare_block_document(doc, blank_between=False)
     return doc
 
 
@@ -659,6 +663,7 @@ def _add_arial_run(paragraph, text, bold=False, underline=False):
 
 def build_checklist_document(app):
     from docx import Document
+    from report_common import prepare_block_document
 
     doc = Document()
     title, items, variables = active_checklist(app)
@@ -684,6 +689,7 @@ def build_checklist_document(app):
             wrote = True
     if not title and not notes:
         doc.add_paragraph("")
+    prepare_block_document(doc, blank_between=False)
     return doc
 
 

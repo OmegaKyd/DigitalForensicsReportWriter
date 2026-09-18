@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from docx.oxml import OxmlElement
+from docx.shared import Pt
 
 from settings_manager import SettingsManager
 from ui_theme import COLORS, parse_mdy_date, resource_dir, writable_dir
@@ -21,8 +22,11 @@ BUNDLED_TEMPLATES_NAME = "Templates"
 TEMPLATES_DIR_KEY = "dfr_templates_dir"
 REQUEST_TITLES_KEY = "remembered_request_titles"
 REQUEST_AGENCIES_KEY = "remembered_request_agencies"
+SERVICE_PROVIDERS_KEY = "remembered_service_providers"
 AGENCIES_SCHEMA_KEY = "request_agencies_schema"
 AGENCIES_SCHEMA = 1
+PROVIDERS_SCHEMA_KEY = "service_providers_schema"
+PROVIDERS_SCHEMA = 2
 DEFAULT_AGENCIES = [
     "South Dakota DCI",
     "South Dakota Highway Patrol",
@@ -32,6 +36,35 @@ AGENCY_COMBO_ATTRS = (
     "transfer_agency",
     "examiner_agency_type",
 )
+PROVIDER_COMBO_ATTRS = (
+    "service_provider",
+)
+DEFAULT_SERVICE_PROVIDERS = [
+    "Amazon",
+    "Apple",
+    "AT&T",
+    "Discord",
+    "Facebook",
+    "Google",
+    "Instagram",
+    "LinkedIn",
+    "Meta",
+    "Microsoft",
+    "Proton",
+    "Reddit",
+    "Snapchat",
+    "Synchronoss",
+    "TikTok",
+    "T-Mobile",
+    "Verizon",
+    "X (Twitter)",
+]
+PROVIDER_ALIASES = {
+    "snap inc.": "Snapchat",
+    "snap inc": "Snapchat",
+    "x": "X (Twitter)",
+    "twitter": "X (Twitter)",
+}
 DEFAULT_REQUEST_TITLES = [
     "Officer",
     "Deputy",
@@ -410,6 +443,135 @@ def remember_agencies_from_form(app):
             pass
     refresh_open_agency_comboboxes(app)
     return agencies
+
+
+def _normalize_providers(values):
+    mapped = []
+    for value in values or []:
+        text = _clean_label(value)
+        if not text:
+            continue
+        mapped.append(PROVIDER_ALIASES.get(text.casefold(), text))
+    return sorted(_normalize_titles(mapped), key=lambda item: item.casefold())
+
+
+def saved_service_provider(settings=None):
+    data = settings if isinstance(settings, dict) else _settings().load_settings()
+    return _clean_label(data.get("default_service_provider", ""))
+
+
+def load_service_providers():
+    settings = _settings().load_settings()
+    remembered = _normalize_providers(settings.get(SERVICE_PROVIDERS_KEY) or [])
+    seeded = list(remembered)
+    last = saved_service_provider(settings)
+    if last:
+        seeded.append(last)
+    if settings.get(PROVIDERS_SCHEMA_KEY) == PROVIDERS_SCHEMA:
+        return _normalize_providers(seeded) or list(DEFAULT_SERVICE_PROVIDERS)
+    return _normalize_providers(list(seeded) + list(DEFAULT_SERVICE_PROVIDERS))
+
+
+def save_service_providers(providers):
+    cleaned = _normalize_providers(providers)
+    if not cleaned:
+        cleaned = list(DEFAULT_SERVICE_PROVIDERS)
+    _settings().save_settings({SERVICE_PROVIDERS_KEY: cleaned, PROVIDERS_SCHEMA_KEY: PROVIDERS_SCHEMA})
+    return cleaned
+
+
+def revert_service_providers():
+    _settings().save_settings({SERVICE_PROVIDERS_KEY: [], PROVIDERS_SCHEMA_KEY: PROVIDERS_SCHEMA})
+    return list(DEFAULT_SERVICE_PROVIDERS)
+
+
+def remember_service_provider(provider):
+    text = _clean_label(provider)
+    if text:
+        text = PROVIDER_ALIASES.get(text.casefold(), text)
+    providers = load_service_providers()
+    if not text:
+        return providers
+    if text.casefold() not in {item.casefold() for item in providers}:
+        save_service_providers(providers + [text])
+    return load_service_providers()
+
+
+def refresh_open_provider_comboboxes(root):
+    providers = load_service_providers()
+    if root is None:
+        return providers
+    seen = set()
+    stack = [root]
+    master = getattr(root, "master", None)
+    if master is not None:
+        stack.append(master)
+    while stack:
+        widget = stack.pop()
+        ident = id(widget)
+        if ident in seen:
+            continue
+        seen.add(ident)
+        for attr in PROVIDER_COMBO_ATTRS:
+            box = getattr(widget, attr, None)
+            if box is None:
+                continue
+            try:
+                current = box.get()
+                box.configure(values=providers)
+                if current:
+                    box.set(current)
+            except Exception:
+                pass
+        try:
+            stack.extend(widget.winfo_children())
+        except Exception:
+            pass
+    return providers
+
+
+def setup_provider_combobox(widget, saved="", on_change=None):
+    saved_text = _clean_label(saved)
+    providers = load_service_providers()
+    if saved_text:
+        providers = remember_service_provider(saved_text)
+    widget.configure(values=providers)
+    bind_prefix_typeahead(widget)
+    widget.set(saved_text)
+    if on_change is not None:
+        widget.bind("<<ComboboxSelected>>", on_change, add="+")
+        widget.bind("<FocusOut>", on_change, add="+")
+    return widget
+
+
+def remember_providers_from_form(app):
+    fields = []
+    for attr in PROVIDER_COMBO_ATTRS:
+        widget = getattr(app, attr, None)
+        if widget is None:
+            continue
+        try:
+            value = widget.get()
+        except Exception:
+            value = ""
+        remember_service_provider(value)
+        fields.append(widget)
+    providers = load_service_providers()
+    last = ""
+    for widget in fields:
+        try:
+            current = widget.get()
+            if current and not last:
+                last = _clean_label(current)
+            widget.configure(values=providers)
+            if current:
+                widget.set(current)
+        except Exception:
+            pass
+    if last:
+        _settings().save_settings({"default_service_provider": last})
+    refresh_open_provider_comboboxes(app)
+    return providers
 
 
 def refresh_request_title_values(widget, title=""):
@@ -1263,10 +1425,14 @@ def suggested_warrant_filename(dfr_number, provider="", account_id=""):
 
 def suggested_report_filename(dfr_number, module_label, owner="", model=""):
     """Default name: '(DFR #) - (Owner Name) (Device Model).docx'."""
-    dfr = sanitize_filename(dfr_number or "")
-    owner = sanitize_filename((owner or "").title())
-    model = sanitize_filename(model or "")
-    owner_model = " ".join(part for part in (owner, model) if part).strip()
+    def part(value):
+        cleaned = re.sub(r'[<>:"/\\|?*]', "", value or "").strip()
+        return re.sub(r"\s+", " ", cleaned)
+
+    dfr = part(dfr_number)
+    owner = part((owner or "").title())
+    model = part(model)
+    owner_model = " ".join(piece for piece in (owner, model) if piece).strip()
     if dfr and owner_model:
         base = f"{dfr} - {owner_model}"
     elif dfr:
@@ -1745,6 +1911,10 @@ def apply_warrant_suggested_filename(app):
 
 def apply_suggested_filename(app, module_label, model=""):
     """Fill Output File Name when it is empty or still the last suggestion."""
+    if model:
+        app._suggested_model = model
+    else:
+        model = getattr(app, "_suggested_model", "") or ""
     dfr = ""
     owner = ""
     try:
@@ -1756,6 +1926,20 @@ def apply_suggested_filename(app, module_label, model=""):
         owner = app.device_owner.get().strip()
     except Exception:
         pass
+    if not getattr(app, "_filename_live_binds", False):
+        app._filename_live_binds = True
+        label = module_label
+
+        def _refresh(_event=None, current=app, kind=label):
+            apply_suggested_filename(current, kind)
+
+        for attr in ("dfr_number", "device_owner"):
+            widget = getattr(app, attr, None)
+            if widget is not None:
+                try:
+                    widget.bind("<KeyRelease>", _refresh, add="+")
+                except Exception:
+                    pass
     suggested = suggested_report_filename(dfr, module_label, owner, model)
     return _write_suggested_filename(app, suggested)
 
@@ -2117,6 +2301,79 @@ def _sdt_content_container(sdt):
     return cell if cell is not None else content
 
 
+def single_space_paragraph(paragraph):
+    """Use single line spacing with no Word space-before / space-after."""
+    if paragraph is None:
+        return paragraph
+    try:
+        fmt = paragraph.paragraph_format
+        fmt.space_before = Pt(0)
+        fmt.space_after = Pt(0)
+        fmt.line_spacing = 1.0
+    except Exception:
+        pass
+    return paragraph
+
+
+def _single_space_p_element(element):
+    """Write explicit single-spacing on a w:p so template styles cannot add space-after."""
+    if element is None:
+        return element
+    tag = str(getattr(element, "tag", ""))
+    if not tag.endswith("}p"):
+        return element
+    ppr = element.find(f"{{{W_NS}}}pPr")
+    if ppr is None:
+        ppr = OxmlElement("w:pPr")
+        element.insert(0, ppr)
+    spacing = ppr.find(f"{{{W_NS}}}spacing")
+    if spacing is None:
+        spacing = OxmlElement("w:spacing")
+        ppr.append(spacing)
+    spacing.set(f"{{{W_NS}}}before", "0")
+    spacing.set(f"{{{W_NS}}}after", "0")
+    spacing.set(f"{{{W_NS}}}line", "240")
+    spacing.set(f"{{{W_NS}}}lineRule", "auto")
+    return element
+
+
+def _paragraph_xml_text(element):
+    if element is None:
+        return ""
+    parts = []
+    for node in element.iter(f"{{{W_NS}}}t"):
+        parts.append(node.text or "")
+    return "".join(parts)
+
+
+def prepare_block_document(doc, blank_between=False):
+    """Single-space a replacement document. Optionally insert blank lines between body paragraphs."""
+    if doc is None:
+        return doc
+    for paragraph in list(getattr(doc, "paragraphs", []) or []):
+        single_space_paragraph(paragraph)
+    if not blank_between:
+        return doc
+    body = getattr(getattr(doc, "element", None), "body", None)
+    if body is None:
+        return doc
+    children = [child for child in list(body) if str(child.tag).endswith("}p")]
+    prev_empty = True
+    insert_before = []
+    for child in children:
+        empty = not _paragraph_xml_text(child).strip()
+        if not empty and not prev_empty:
+            insert_before.append(child)
+        prev_empty = empty
+    for child in reversed(insert_before):
+        blank = OxmlElement("w:p")
+        _single_space_p_element(blank)
+        child.addprevious(blank)
+    for paragraph in list(getattr(doc, "paragraphs", []) or []):
+        single_space_paragraph(paragraph)
+    return doc
+
+
 def _plain_from_doc(replacement_doc):
     if replacement_doc is None:
         return ""
@@ -2127,13 +2384,14 @@ def _plain_from_doc(replacement_doc):
     return text
 
 
-def _fill_block_sdt(sdt, replacement_doc):
+def _fill_block_sdt(sdt, replacement_doc, blank_between=False):
     from copy import deepcopy
 
     container = _sdt_content_container(sdt)
     if container is None:
         return False
     _remove_showing_placeholder(sdt)
+    prepare_block_document(replacement_doc, blank_between=blank_between)
     paragraphs = list(getattr(replacement_doc, "paragraphs", []) or [])
     # python-docx starts a new Document() with one empty paragraph. Drop only that
     # unused first paragraph so intentional blank lines between artifacts remain.
@@ -2154,6 +2412,7 @@ def _fill_block_sdt(sdt, replacement_doc):
     for para in paragraphs:
         clone = deepcopy(para._element)
         _force_arial(clone)
+        _single_space_p_element(clone)
         if insert_after is None:
             container.append(clone)
         else:
@@ -2177,7 +2436,7 @@ def fill_tagged_text_controls(doc, search_docs):
         replacement = lookup[name.casefold()]
         _remove_showing_placeholder(sdt)
         if name.upper() in BLOCK_CONTENT_TAGS and hasattr(replacement, "paragraphs"):
-            if _fill_block_sdt(sdt, replacement):
+            if _fill_block_sdt(sdt, replacement, blank_between=False):
                 changed += 1
             continue
         text = _plain_from_doc(replacement) if hasattr(replacement, "paragraphs") else str(replacement or "")
@@ -2233,4 +2492,10 @@ def apply_template_fields(doc, app, search_docs=None):
         docs["PY_EXAMINE"] = examine
     text_count = fill_tagged_text_controls(doc, docs)
     box_count = apply_tagged_checkboxes(doc, form_checkbox_states(app))
+    try:
+        from magnet_artifacts import apply_artifact_list_numbering
+
+        apply_artifact_list_numbering(doc)
+    except Exception:
+        pass
     return text_count + box_count

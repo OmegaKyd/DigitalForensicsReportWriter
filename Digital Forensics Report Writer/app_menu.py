@@ -146,6 +146,11 @@ def open_agencies_editor(parent):
     _open(parent)
 
 
+def open_providers_editor(parent):
+    from providers_editor import open_providers_editor as _open
+    _open(parent)
+
+
 def _change_template_folder(parent):
     from report_common import change_templates_location
 
@@ -179,6 +184,7 @@ def attach_app_menu(window, is_start=False):
     tools_menu.add_command(label="Edit Paragraphs...", command=lambda: open_paragraph_editor(window))
     tools_menu.add_command(label="Edit Officer Titles...", command=lambda: open_titles_editor(window))
     tools_menu.add_command(label="Edit Agencies...", command=lambda: open_agencies_editor(window))
+    tools_menu.add_command(label="Edit Service Providers...", command=lambda: open_providers_editor(window))
     tools_menu.add_separator()
     tools_menu.add_command(
         label="Report Number Prefix...",

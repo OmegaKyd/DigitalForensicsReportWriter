@@ -34,6 +34,7 @@ class SettingsManager:
             "dfr_templates_dir": "",
             "remembered_request_titles": [],
             "remembered_request_agencies": [],
+            "remembered_service_providers": [],
             "version": "1.0.6-beta.1",
         }
 

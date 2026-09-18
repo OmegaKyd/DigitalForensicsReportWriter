@@ -51,6 +51,7 @@ from report_common import (
     is_complete_dfr_number,
     add_template_picker,
     sync_template_choice,
+    prepare_block_document,
 )
 from docx.oxml.ns import qn
 from docx.oxml import parse_xml
@@ -2361,6 +2362,7 @@ class PCPortableCase(DndToplevel):
 
         # Paragraph 10
         add_paragraph_with_style(new_doc, self.paragraphs['ten'])
+        prepare_block_document(new_doc, blank_between=False)
     
     def save_document(self, doc):
         output_filename = self.output_filename.get().strip()

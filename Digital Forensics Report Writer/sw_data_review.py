@@ -21,6 +21,8 @@ from report_common import (
     remember_titles_from_form,
     setup_agency_combobox,
     remember_agencies_from_form,
+    setup_provider_combobox,
+    remember_providers_from_form,
     title_agency_words,
     saved_examiner_agency,
     bind_prefix_typeahead,
@@ -28,6 +30,7 @@ from report_common import (
     apply_warrant_suggested_filename,
     apply_template_fields,
     xml_replaceable_search_docs,
+    prepare_block_document,
 )
 from docx.oxml.ns import qn
 from docx.oxml import parse_xml
@@ -401,8 +404,9 @@ class WarrantDataReturns(DndToplevel):
         account_frame.pack(fill=tk.X, padx=5, pady=4, expand=False)   # ← no expand
 
         ttk.Label(account_frame, text="Service Provider:").grid(row=0, column=0, sticky="w", pady=2)
-        self.service_provider = ttk.Entry(account_frame)
+        self.service_provider = ttk.Combobox(account_frame)
         self.service_provider.grid(row=0, column=1, sticky="ew", pady=2)
+        setup_provider_combobox(self.service_provider)
 
         ttk.Label(account_frame, text="Account Identifier:").grid(row=1, column=0, sticky="w", pady=2)
         self.account_identifier = ttk.Entry(account_frame)
@@ -632,6 +636,11 @@ class WarrantDataReturns(DndToplevel):
         content.columnconfigure(1, weight=1)
         for widget in (self.dfr_number, self.service_provider, self.account_identifier):
             widget.bind("<KeyRelease>", lambda event: apply_warrant_suggested_filename(self), add="+")
+        self.service_provider.bind(
+            "<<ComboboxSelected>>",
+            lambda event: apply_warrant_suggested_filename(self),
+            add="+",
+        )
         apply_warrant_suggested_filename(self)
 
     def create_template_file_frame(self):
@@ -767,6 +776,7 @@ class WarrantDataReturns(DndToplevel):
         else:
             add(self.paragraphs["three_b"])
 
+        prepare_block_document(new_doc, blank_between=False)
         if hasattr(self, "cb_axiom_var") and self.cb_axiom_var.get() == 1:
             header = new_doc.add_paragraph()
             run = header.add_run("ARTIFACTS:")
@@ -792,6 +802,7 @@ class WarrantDataReturns(DndToplevel):
                 run.font.name = "Arial"
                 run.font.size = Pt(11)
                 run.font.italic = True
+        prepare_block_document(new_doc, blank_between=False)
 
 ###PARAGRAPHS###
 
@@ -1034,6 +1045,7 @@ class WarrantDataReturns(DndToplevel):
                 doc.save(final_path)
                 remember_titles_from_form(self)
                 remember_agencies_from_form(self)
+                remember_providers_from_form(self)
                 delete_draft_for_app(self)
                 messagebox.showinfo("Success", f"Report auto-saved to:\n{final_path}")
 
@@ -1060,6 +1072,7 @@ class WarrantDataReturns(DndToplevel):
                 doc.save(save_path)
                 remember_titles_from_form(self)
                 remember_agencies_from_form(self)
+                remember_providers_from_form(self)
                 delete_draft_for_app(self)
                 messagebox.showinfo("Success", f"Report saved to:\n{save_path}")
 

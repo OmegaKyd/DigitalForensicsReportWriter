@@ -52,6 +52,7 @@ from report_common import (
     is_complete_dfr_number,
     add_template_picker,
     sync_template_choice,
+    prepare_block_document,
 )
 from docx.oxml.ns import qn
 from docx.oxml import parse_xml
@@ -2741,6 +2742,7 @@ class PCFullExam(DndToplevel):
             
             # Add No Evidence paragraph instead of AXIOM report
             add_paragraph_with_style(new_doc, self.paragraphs['Paragraph_NoEv'])
+            prepare_block_document(new_doc, blank_between=False)
         else:
             # Add remaining paragraphs for normal flow
             self.add_bold_underline_paragraph(new_doc, self.paragraphs['nine'])
@@ -2761,6 +2763,7 @@ class PCFullExam(DndToplevel):
                 
                 # Add Artifacts Header
                 self.add_bold_underline_paragraph(new_doc, self.paragraphs['seventeen'])
+                prepare_block_document(new_doc, blank_between=False)
                 
                 # Add artifacts if selected
                 if hasattr(self, 'selected_artifacts') and self.selected_artifacts:
@@ -2773,6 +2776,9 @@ class PCFullExam(DndToplevel):
                     run.font.name = 'Arial'
                     run.font.size = Pt(11)
                     run.font.italic = True
+            else:
+                prepare_block_document(new_doc, blank_between=False)
+        prepare_block_document(new_doc, blank_between=False)
     
     def save_document(self, doc):
         output_filename = self.output_filename.get().strip()
