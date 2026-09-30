@@ -156,7 +156,11 @@ DEFAULT_PARAGRAPHS = {'mobile_full': {'one_a': '\n'
                  'Paragraph_NoEv': '\n'
                                    'During the forensic examination of the source device, no data or '
                                    'information of evidentiary value related to this investigation was '
-                                   'recovered.'},
+                                   'recovered.',
+                 'Paragraph_NoExtract': '\n'
+                                        'No forensic extraction was completed from the source device. This '
+                                        'report documents the examination request and the information '
+                                        'available at the time of this report.'},
  'mobile_portable': {'one_a': '\n'
                               'On {Request_Date}, I, {Examiner_Title} {Examiner_Name}, with the '
                               '{Examiner_Agency} ({Examiner_Agency_Abbr}), received a request for a forensic '
@@ -256,7 +260,11 @@ DEFAULT_PARAGRAPHS = {'mobile_full': {'one_a': '\n'
                              'extracted data.',
                      'ten': '\n'
                             'A copy of the extracted data will be stored on the {Examiner_Agency_Abbr} '
-                            'Digital Evidence Management System.'},
+                            'Digital Evidence Management System.',
+                     'Paragraph_NoExtract': '\n'
+                                            'No forensic extraction was completed from the source device. This '
+                                            'report documents the examination request and the information '
+                                            'available at the time of this report.'},
  'pc_full': {'one_a_computer': '\n'
                                'On {Request_Date}, I, {Examiner_Title} {Examiner_Name}, with the '
                                '{Examiner_Agency} ({Examiner_Agency_Abbr}), took possession of the '
@@ -444,7 +452,11 @@ DEFAULT_PARAGRAPHS = {'mobile_full': {'one_a': '\n'
              'Paragraph_NoEv': '\n'
                                'During the forensic examination of the (source_device), no data or '
                                'information of evidentiary value related to this investigation was '
-                               'recovered.'},
+                               'recovered.',
+             'Paragraph_NoExtract': '\n'
+                                    'No forensic extraction was completed from the source device. This '
+                                    'report documents the examination request and the information available '
+                                    'at the time of this report.'},
  'pc_portable': {'one_b_computer': '\n'
                                    'On {Request_Date}, I, {Examiner_Title} {Examiner_Name}, with the '
                                    '{Examiner_Agency} ({Examiner_Agency_Abbr}), received a request for a '
@@ -564,7 +576,11 @@ DEFAULT_PARAGRAPHS = {'mobile_full': {'one_a': '\n'
                          '{Request_Officer_LastName}.',
                  'ten': '\n'
                         'Unless requested, I will not be conducting any further examination of the extracted '
-                        'data.'},
+                        'data.',
+                 'Paragraph_NoExtract': '\n'
+                                        'No forensic extraction was completed from the source device. This '
+                                        'report documents the examination request and the information '
+                                        'available at the time of this report.'},
  'warrant': {'intro_self': 'On {Warrant_Service_Date}, a search warrant was served on {Service_Provider} for the data '
                            'related to the user account belonging to {Account_Owner} ({Account_Identifier}). On {Data_Return_Date}, I '
                            'received the responsive data from {Service_Provider}. This return consisted of '

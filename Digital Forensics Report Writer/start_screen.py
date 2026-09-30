@@ -1,6 +1,9 @@
 import sys
 sys.dont_write_bytecode = True
 
+from crash_log import install_crash_logging
+install_crash_logging()
+
 import tkinter as tk
 from tkinter import ttk, messagebox
 import ctypes
@@ -30,6 +33,7 @@ class StartScreen(TkinterDnD.Tk):
         self.title(f"Ω {APP_NAME} Ω")
         apply_theme(self)
         attach_app_menu(self, is_start=True)
+        install_crash_logging(self)
 
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
@@ -194,12 +198,11 @@ if __name__ == "__main__":
     _hide_console()
     try:
         root = StartScreen()
+        install_crash_logging(root)
         root.mainloop()
-    except Exception as e:
-        try:
-            messagebox.showerror("Error", f"An unexpected error occurred: {str(e)}")
-        except Exception:
-            print(f"An unexpected error occurred: {e}")
+    except Exception:
+        from crash_log import handle_exception
+        handle_exception(*sys.exc_info())
         sys.exit(1)
 
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.6-beta.1) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.1.0) © 2026 #

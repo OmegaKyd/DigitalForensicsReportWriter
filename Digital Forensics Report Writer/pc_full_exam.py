@@ -42,8 +42,15 @@ from report_common import (
     remember_titles_from_form,
     setup_agency_combobox,
     remember_agencies_from_form,
+    setup_officer_combobox,
+    remember_officers_from_form,
     apply_template_fields,
     xml_replaceable_search_docs,
+    reportable_missing_placeholders,
+    add_outcome_checkboxes,
+    no_extraction_completed,
+    no_extraction_missing_fields,
+    extraction_data_for_report,
     title_agency_words,
     saved_examiner_agency,
     bind_prefix_typeahead,
@@ -102,13 +109,18 @@ class PCFullExam(DndToplevel):
         self.main_frame = ttk.Frame(self)
         self.main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
+        self.form_tabs = FormTabs(self.main_frame)
+
         self.paned_window = ttk.PanedWindow(self.main_frame, orient=tk.HORIZONTAL)
         self.paned_window.pack(fill=tk.BOTH, expand=True)
         
         self.left_frame = ttk.Frame(self.paned_window)
         self.paned_window.add(self.left_frame, weight=3)
+        self.form_tabs.attach_body(self.left_frame)
 
-        self.form_tabs = FormTabs(self.left_frame)
+        self.right_frame = ttk.Frame(self.paned_window)
+        self.paned_window.add(self.right_frame, weight=2)
+
         self.tab_request = self.form_tabs.add_tab("request", "Request Info")
         self.tab_examiner = self.form_tabs.add_tab("examiner", "Examiner Info")
         self.tab_device = self.form_tabs.add_tab("device", "Device Info")
@@ -116,9 +128,6 @@ class PCFullExam(DndToplevel):
         add_notes_tab(self, self.form_tabs)
         self.scrollable_frame = self.tab_request
         self.middle_frame = self.tab_device
-
-        self.right_frame = ttk.Frame(self.paned_window)
-        self.paned_window.add(self.right_frame, weight=2)
         
         self.create_widgets()
         self.create_info_display()
@@ -142,7 +151,8 @@ class PCFullExam(DndToplevel):
     def bind_tab_status_events(self):
         for name in (
             "role_type", "request_date", "request_agency", "request_officer", "case_type",
-            "offense_type", "examiner_name", "dfr_number", "device_owner", "save_location",
+            "offense_type", "examiner_name", "dfr_number", "device_owner", "device_type",
+            "device_type_entry", "device_PCMan", "save_location",
         ):
             widget = getattr(self, name, None)
             if widget is None:
@@ -164,11 +174,26 @@ class PCFullExam(DndToplevel):
         elif getattr(self, "role_type", None) and self.role_type.get() == "Case Agent":
             request_ok = self._field_filled(getattr(self, "offense_type", None))
         examiner_ok = self._field_filled(getattr(self, "examiner_name", None)) and is_complete_dfr_number(self.dfr_number.get() if hasattr(self, "dfr_number") else "")
-        device_ok = self._field_filled(getattr(self, "device_owner", None))
+        device_type = ""
+        try:
+            device_type = (self.device_type.get() or "").strip() if hasattr(self, "device_type") else ""
+        except Exception:
+            device_type = ""
+        if device_type == "Other Storage Device":
+            device_type_ok = self._field_filled(getattr(self, "device_type_entry", None))
+        else:
+            device_type_ok = bool(device_type)
+        device_ok = (
+            self._field_filled(getattr(self, "device_owner", None))
+            and device_type_ok
+            and self._field_filled(getattr(self, "device_PCMan", None))
+        )
         try:
             device_ok = device_ok and bool(self.get_selected_forensic_software())
         except Exception:
             pass
+        if no_extraction_completed(self):
+            device_ok = True
         output_ok = self._field_filled(getattr(self, "save_location", None))
         if output_ok:
             try:
@@ -260,8 +285,9 @@ class PCFullExam(DndToplevel):
 
         # Request Officer
         ttk.Label(self.agency_assist_frame, text="Requesting Officer:").grid(row=3, column=0, sticky="w", pady=2)
-        self.request_officer = ttk.Entry(self.agency_assist_frame)
+        self.request_officer = ttk.Combobox(self.agency_assist_frame)
         self.request_officer.grid(row=3, column=1, sticky="ew", pady=2)
+        setup_officer_combobox(self.request_officer)
 
         # Offense Type
         ttk.Label(self.agency_assist_frame, text="Primary Case Offense:").grid(row=4, column=0, sticky="w", pady=2)
@@ -590,7 +616,7 @@ class PCFullExam(DndToplevel):
                 "examiner_agency_custom": "",
                 "examiner_title": examiner_title_value,
                 "examiner_name": self.examiner_name.get(),
-                "version": "1.0.6-beta.1"
+                "version": "1.1.0"
             }
             
             self.settings_manager.save_settings(settings_to_save)
@@ -726,6 +752,7 @@ class PCFullExam(DndToplevel):
             # Clear artifacts when Axiom is deselected
             self.selected_artifacts = []
             self.selected_artifact_sources = {}
+        self.refresh_tab_status()
 
 
     def toggle_artifacts_button(self, event=None):
@@ -972,15 +999,7 @@ class PCFullExam(DndToplevel):
             self.right_frame,
             "Add a log file (.txt) to see the extracted information.",
         )
-        self.no_evidence_var = tk.IntVar(self)
-        self.no_evidence_checkbox = ttk.Checkbutton(
-            self.info_frame,
-            text="No Evidence Found",
-            variable=self.no_evidence_var,
-            onvalue=1,
-            offvalue=0,
-        )
-        self.no_evidence_checkbox.pack(anchor="w", pady=(6, 0))
+        add_outcome_checkboxes(self, self.info_frame)
 
     def update_info_display(self, message=None, data=None):
         self.info_display.config(state=tk.NORMAL)
@@ -1235,6 +1254,7 @@ class PCFullExam(DndToplevel):
             extraction_data = self.parse_log_file()
             apply_log_device_fields_to_form(self, extraction_data)
             self.update_info_display(data=extraction_data)
+            self.refresh_tab_status()
             
             # No popup messages - the file type will be shown in the display window header
         else:
@@ -1261,6 +1281,7 @@ class PCFullExam(DndToplevel):
                 apply_log_device_fields_to_form(self, extraction_data)
                 self.update_info_display(data=extraction_data)
                 apply_suggested_filename(self, "PC", (extraction_data or {}).get("device_model", ""))
+                self.refresh_tab_status()
                 
                 # No popup messages - the file type will be shown in the display window header
             else:
@@ -1741,6 +1762,9 @@ class PCFullExam(DndToplevel):
         )
 
     def validate_fields(self):
+        if no_extraction_completed(self):
+            return no_extraction_missing_fields(self)
+
         missing_fields = []
 
         examiner_agency = (self.examiner_agency_type.get() or "").strip()
@@ -2171,10 +2195,7 @@ class PCFullExam(DndToplevel):
                 })
 
             # Get extraction data for forensic extraction section only
-            try:
-                extraction_data = self.parse_extraction_file()
-            except Exception:
-                extraction_data = {}
+            extraction_data = extraction_data_for_report(self)
             
             # Only copy specific fields from extraction_data - NOT device info fields
             extraction_fields_to_copy = [
@@ -2333,7 +2354,10 @@ class PCFullExam(DndToplevel):
                             replaced_strings[search_string] = True
                 
                 # Check for missing strings and show appropriate warnings
-                final_missing = [s for s, replaced in replaced_strings.items() if not replaced]
+                final_missing = reportable_missing_placeholders(
+                    doc,
+                    [s for s, replaced in replaced_strings.items() if not replaced],
+                )
                 
                 if final_missing:
                     if "PY_TEXT" in final_missing:
@@ -2473,7 +2497,7 @@ class PCFullExam(DndToplevel):
                 log_content = ""
         
          # Get extraction data for date formatting
-        extraction_data = self.parse_extraction_file() if hasattr(self, 'parse_extraction_file') else {}
+        extraction_data = extraction_data_for_report(self)
         
         # Format the date as mm/dd/yyyy
         image_date = format_date_for_image(extraction_data)
@@ -2551,16 +2575,15 @@ class PCFullExam(DndToplevel):
         
         # Create content for each search string
         for search_string, doc in search_docs.items():
-            if search_string in ("PY_TEXT", "PY_NOTES", "PY_ACQUIRE"):
-                # These are handled by generate_paragraphs
+            if search_string in ("PY_TEXT", "PY_NOTES"):
                 para_count = len(doc.paragraphs) if doc.paragraphs else 0
                 print(f"  {search_string}: {para_count} paragraphs already generated")
                 continue 
             
-            # Special handling for PY_ACQUIRE to preserve formatting
             if search_string == "PY_ACQUIRE":
                 print(f"  {search_string}: preserving log file formatting ({len(log_content)} characters)")
                 add_formatted_log_to_doc(doc, log_content)
+                prepare_block_document(doc, blank_between=False)
                 continue
             
             value = replacement_map.get(search_string, '')
@@ -2711,6 +2734,14 @@ class PCFullExam(DndToplevel):
         # Add Paragraph Four - Forensic Extraction Header
         self.add_bold_underline_paragraph(new_doc, self.paragraphs['four'])
 
+        if no_extraction_completed(self):
+            add_paragraph_with_style(new_doc, self.paragraphs.get("Paragraph_NoExtract", ""))
+            if getattr(self, "no_evidence_var", None) is not None and self.no_evidence_var.get() == 1:
+                self.add_bold_underline_paragraph(new_doc, self.paragraphs['nine'])
+                add_paragraph_with_style(new_doc, self.paragraphs['Paragraph_NoEv'])
+            prepare_block_document(new_doc, blank_between=False)
+            return
+
         # Add Paragraph Five - based on extraction type
         if hasattr(self, 'extraction_type'):
             if self.extraction_type == "TX1":
@@ -2853,6 +2884,7 @@ class PCFullExam(DndToplevel):
             doc.save(output_path)
             remember_titles_from_form(self)
             remember_agencies_from_form(self)
+            remember_officers_from_form(self)
             delete_draft_for_app(self)
             messagebox.showinfo("Success", f"Report generated and saved as:\n{output_path}")
             
@@ -3037,4 +3069,4 @@ class PCFullExam(DndToplevel):
         close_and_return(self)
 
 
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.6-beta.1) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.1.0) © 2026 #

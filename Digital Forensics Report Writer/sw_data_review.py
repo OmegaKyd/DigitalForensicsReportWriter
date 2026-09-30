@@ -21,6 +21,8 @@ from report_common import (
     remember_titles_from_form,
     setup_agency_combobox,
     remember_agencies_from_form,
+    setup_officer_combobox,
+    remember_officers_from_form,
     setup_provider_combobox,
     remember_providers_from_form,
     title_agency_words,
@@ -75,13 +77,18 @@ class WarrantDataReturns(DndToplevel):
         self.main_frame = ttk.Frame(self)
         self.main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
+        self.form_tabs = FormTabs(self.main_frame)
+
         self.paned_window = ttk.PanedWindow(self.main_frame, orient=tk.HORIZONTAL)
         self.paned_window.pack(fill=tk.BOTH, expand=True)
 
         self.left_frame = ttk.Frame(self.paned_window)
         self.paned_window.add(self.left_frame, weight=3)
+        self.form_tabs.attach_body(self.left_frame)
 
-        self.form_tabs = FormTabs(self.left_frame)
+        self.right_frame = ttk.Frame(self.paned_window)
+        self.paned_window.add(self.right_frame, weight=2)
+
         self.tab_request = self.form_tabs.add_tab("request", "Request Info")
         self.tab_examiner = self.form_tabs.add_tab("examiner", "Examiner Info")
         self.tab_account = self.form_tabs.add_tab("account", "Account Info")
@@ -89,9 +96,6 @@ class WarrantDataReturns(DndToplevel):
         add_notes_tab(self, self.form_tabs)
         self.scrollable_frame = self.tab_request
         self.middle_frame = self.tab_account
-
-        self.right_frame = ttk.Frame(self.paned_window)
-        self.paned_window.add(self.right_frame, weight=2)
         
         self.selected_artifacts = []
         self.selected_artifact_sources = {}
@@ -291,8 +295,9 @@ class WarrantDataReturns(DndToplevel):
         self.request_title_entry.grid_remove()
 
         ttk.Label(self.agency_assist_fields, text="Requesting Officer:").grid(row=4, column=0, sticky="w", pady=2)
-        self.request_officer = ttk.Entry(self.agency_assist_fields)
+        self.request_officer = ttk.Combobox(self.agency_assist_fields)
         self.request_officer.grid(row=4, column=1, sticky="ew", pady=2)
+        setup_officer_combobox(self.request_officer)
         self.agency_assist_fields.columnconfigure(1, weight=1)
 
         ttk.Label(request_frame, text="Primary Case Offense:").grid(row=1, column=0, sticky="w", pady=2)
@@ -1045,6 +1050,7 @@ class WarrantDataReturns(DndToplevel):
                 doc.save(final_path)
                 remember_titles_from_form(self)
                 remember_agencies_from_form(self)
+                remember_officers_from_form(self)
                 remember_providers_from_form(self)
                 delete_draft_for_app(self)
                 messagebox.showinfo("Success", f"Report auto-saved to:\n{final_path}")
@@ -1072,6 +1078,7 @@ class WarrantDataReturns(DndToplevel):
                 doc.save(save_path)
                 remember_titles_from_form(self)
                 remember_agencies_from_form(self)
+                remember_officers_from_form(self)
                 remember_providers_from_form(self)
                 delete_draft_for_app(self)
                 messagebox.showinfo("Success", f"Report saved to:\n{save_path}")
@@ -1273,4 +1280,4 @@ if __name__ == "__main__":
     app = WarrantDataReturns()
     app.mainloop()
     
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.6-beta.1) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.1.0) © 2026 #

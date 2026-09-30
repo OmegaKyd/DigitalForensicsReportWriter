@@ -90,6 +90,7 @@ VAR_ATTRS = (
     "cb_manual_var",
     "device_transfer_var",
     "no_evidence_var",
+    "no_extraction_var",
     "time_frame_limited_var",
     "time_frame_var",
     "case_time_frame_var",
@@ -506,7 +507,7 @@ def add_notes_tab(app, form_tabs, mobile_checklists=False):
     text = tk.Text(
         wrap,
         wrap="word",
-        height=10 if mobile_checklists else 18,
+        height=18,
         bg=COLORS["entry_bg"],
         fg=COLORS["text"],
         insertbackground=COLORS["accent"],
@@ -519,8 +520,16 @@ def add_notes_tab(app, form_tabs, mobile_checklists=False):
     scroll.pack(side=tk.RIGHT, fill=tk.Y)
     app.exam_notes = text
     app.tab_notes = page
-    if mobile_checklists:
+    # mobile_checklists is kept for call-site compatibility; checklists live on Device Prep.
+    if mobile_checklists and not getattr(app, "android_checklist_vars", None):
         add_mobile_checklists(app, page)
+    return page
+
+
+def add_device_checklist_tab(app, form_tabs):
+    page = form_tabs.add_tab("prep", "Device Prep")
+    app.tab_prep = page
+    add_mobile_checklists(app, page)
     return page
 
 
@@ -532,7 +541,7 @@ def add_mobile_checklists(app, parent):
     box.pack(fill=tk.X, expand=False, padx=5, pady=(0, 5))
     ttk.Label(
         box,
-        text="Check items from only one list. Use one list as a prep reminder; notes print at PY_NOTES.",
+        text="Optional. Check items from only one list. Checked items mark the matching boxes on the Mobile template.",
         style="Hint.TLabel",
         wraplength=640,
     ).pack(anchor="w", pady=(0, 8))
@@ -561,7 +570,7 @@ def add_mobile_checklists(app, parent):
                 variable=var,
                 onvalue=1,
                 offvalue=0,
-                command=lambda kind=attr_name, current=var: _enforce_single_checklist(app, kind, current),
+                command=lambda kind=attr_name, current=var: _on_checklist_change(app, kind, current),
             ).pack(anchor="w", pady=1)
             variables.append(var)
         setattr(app, attr_name, variables)
@@ -569,6 +578,15 @@ def add_mobile_checklists(app, parent):
 
     build_column(columns, 0, "ANDROID CHECKLIST", ANDROID_CHECKLIST_ITEMS, "android_checklist_vars")
     build_column(columns, 1, "APPLE iOS CHECKLIST", IOS_CHECKLIST_ITEMS, "ios_checklist_vars")
+
+
+def _on_checklist_change(app, changed_attr, current_var):
+    _enforce_single_checklist(app, changed_attr, current_var)
+    if hasattr(app, "refresh_tab_status"):
+        try:
+            app.refresh_tab_status()
+        except Exception:
+            pass
 
 
 def _enforce_single_checklist(app, changed_attr, current_var):
@@ -590,7 +608,7 @@ def _enforce_single_checklist(app, changed_attr, current_var):
 
 
 def checklist_checkbox_states(app):
-    """Map Notes-tab Android/iOS checks to the Mobile template tags."""
+    """Map Device Prep Android/iOS checks to the Mobile template tags."""
     states = {}
     for tags, attr in (
         (ANDROID_CHECKLIST_TAGS, "android_checklist_vars"),

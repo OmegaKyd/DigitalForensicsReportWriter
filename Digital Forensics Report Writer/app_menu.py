@@ -151,6 +151,11 @@ def open_providers_editor(parent):
     _open(parent)
 
 
+def open_officers_editor(parent):
+    from officers_editor import open_officers_editor as _open
+    _open(parent)
+
+
 def _change_template_folder(parent):
     from report_common import change_templates_location
 
@@ -184,6 +189,7 @@ def attach_app_menu(window, is_start=False):
     tools_menu.add_command(label="Edit Paragraphs...", command=lambda: open_paragraph_editor(window))
     tools_menu.add_command(label="Edit Officer Titles...", command=lambda: open_titles_editor(window))
     tools_menu.add_command(label="Edit Agencies...", command=lambda: open_agencies_editor(window))
+    tools_menu.add_command(label="Edit Requesting Officers...", command=lambda: open_officers_editor(window))
     tools_menu.add_command(label="Edit Service Providers...", command=lambda: open_providers_editor(window))
     tools_menu.add_separator()
     tools_menu.add_command(
@@ -195,6 +201,7 @@ def attach_app_menu(window, is_start=False):
     help_menu = tk.Menu(menubar, tearoff=0)
     help_menu.add_command(label="How-To Guide...", command=lambda: open_howto(window))
     help_menu.add_command(label="Placeholder Index (PY_ tags)...", command=lambda: show_placeholder_guide(window))
+    help_menu.add_command(label="Open Crash Logs...", command=lambda: open_crash_logs(window))
     help_menu.add_separator()
     help_menu.add_command(label="About", command=lambda: show_about(window))
     menubar.add_cascade(label="Help", menu=help_menu)
@@ -509,6 +516,26 @@ def _exit_program(window, is_start):
         os._exit(0)
 
 
+def open_crash_logs(parent):
+    from crash_log import crash_log_path, logs_dir, open_crash_logs as _open
+
+    folder = logs_dir()
+    path = crash_log_path()
+    if not path.is_file():
+        messagebox.showinfo(
+            "Crash Logs",
+            "No crash log has been written yet.\n\n"
+            "If the program hits an unexpected error it will save a log here:\n"
+            f"{path}",
+            parent=parent,
+        )
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+    _open(parent)
+
+
 def show_about(parent):
     win = tk.Toplevel(parent)
     win.title("About")
@@ -521,7 +548,17 @@ def show_about(parent):
 
     ttk.Label(frame, text=APP_NAME, font=("Segoe UI", 12, "bold")).pack(anchor="w")
     ttk.Label(frame, text=f"Version {APP_VERSION}").pack(anchor="w", pady=(6, 0))
-    ttk.Label(frame, text=f"© {COPYRIGHT_YEAR}").pack(anchor="w", pady=(2, 10))
+    ttk.Label(frame, text=f"© {COPYRIGHT_YEAR}").pack(anchor="w", pady=(2, 6))
+    try:
+        from crash_log import crash_log_path
+        ttk.Label(
+            frame,
+            text=f"Crash log: {crash_log_path()}",
+            style="Hint.TLabel",
+            wraplength=420,
+        ).pack(anchor="w", pady=(0, 10))
+    except Exception:
+        pass
 
     link = tk.Label(
         frame,

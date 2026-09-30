@@ -22,6 +22,7 @@ BUNDLED_TEMPLATES_NAME = "Templates"
 TEMPLATES_DIR_KEY = "dfr_templates_dir"
 REQUEST_TITLES_KEY = "remembered_request_titles"
 REQUEST_AGENCIES_KEY = "remembered_request_agencies"
+REQUEST_OFFICERS_KEY = "remembered_request_officers"
 SERVICE_PROVIDERS_KEY = "remembered_service_providers"
 AGENCIES_SCHEMA_KEY = "request_agencies_schema"
 AGENCIES_SCHEMA = 1
@@ -35,6 +36,9 @@ AGENCY_COMBO_ATTRS = (
     "request_agency",
     "transfer_agency",
     "examiner_agency_type",
+)
+OFFICER_COMBO_ATTRS = (
+    "request_officer",
 )
 PROVIDER_COMBO_ATTRS = (
     "service_provider",
@@ -84,6 +88,9 @@ DEFAULT_REQUEST_TITLES = [
 ]
 TITLES_SCHEMA_KEY = "request_titles_schema"
 TITLES_SCHEMA = 2
+OFFICERS_SCHEMA_KEY = "request_officers_schema"
+OFFICERS_SCHEMA = 1
+DEFAULT_REQUEST_OFFICERS = []
 
 
 def _clean_label(value):
@@ -572,6 +579,111 @@ def remember_providers_from_form(app):
         _settings().save_settings({"default_service_provider": last})
     refresh_open_provider_comboboxes(app)
     return providers
+
+
+def _normalize_officers(values):
+    return sorted(_normalize_titles(values), key=lambda item: item.casefold())
+
+
+def load_request_officers():
+    settings = _settings().load_settings()
+    remembered = _normalize_officers(settings.get(REQUEST_OFFICERS_KEY) or [])
+    if settings.get(OFFICERS_SCHEMA_KEY) == OFFICERS_SCHEMA:
+        return remembered
+    return remembered
+
+
+def save_request_officers(officers):
+    cleaned = _normalize_officers(officers)
+    _settings().save_settings({REQUEST_OFFICERS_KEY: cleaned, OFFICERS_SCHEMA_KEY: OFFICERS_SCHEMA})
+    return cleaned
+
+
+def revert_request_officers():
+    _settings().save_settings({REQUEST_OFFICERS_KEY: [], OFFICERS_SCHEMA_KEY: OFFICERS_SCHEMA})
+    return list(DEFAULT_REQUEST_OFFICERS)
+
+
+def remember_request_officer(officer):
+    text = _clean_label(officer)
+    officers = load_request_officers()
+    if not text:
+        return officers
+    if text.casefold() not in {item.casefold() for item in officers}:
+        save_request_officers(officers + [text])
+    return load_request_officers()
+
+
+def refresh_open_officer_comboboxes(root):
+    officers = load_request_officers()
+    if root is None:
+        return officers
+    seen = set()
+    stack = [root]
+    master = getattr(root, "master", None)
+    if master is not None:
+        stack.append(master)
+    while stack:
+        widget = stack.pop()
+        ident = id(widget)
+        if ident in seen:
+            continue
+        seen.add(ident)
+        for attr in OFFICER_COMBO_ATTRS:
+            box = getattr(widget, attr, None)
+            if box is None:
+                continue
+            try:
+                current = box.get()
+                box.configure(values=officers)
+                if current:
+                    box.set(current)
+            except Exception:
+                pass
+        try:
+            stack.extend(widget.winfo_children())
+        except Exception:
+            pass
+    return officers
+
+
+def setup_officer_combobox(widget, saved="", on_change=None):
+    saved_text = _clean_label(saved)
+    officers = load_request_officers()
+    if saved_text:
+        officers = remember_request_officer(saved_text)
+    widget.configure(values=officers)
+    bind_prefix_typeahead(widget)
+    widget.set(saved_text)
+    if on_change is not None:
+        widget.bind("<<ComboboxSelected>>", on_change, add="+")
+        widget.bind("<FocusOut>", on_change, add="+")
+    return widget
+
+
+def remember_officers_from_form(app):
+    fields = []
+    for attr in OFFICER_COMBO_ATTRS:
+        widget = getattr(app, attr, None)
+        if widget is None:
+            continue
+        try:
+            value = widget.get()
+        except Exception:
+            value = ""
+        remember_request_officer(value)
+        fields.append(widget)
+    officers = load_request_officers()
+    for widget in fields:
+        try:
+            current = widget.get()
+            widget.configure(values=officers)
+            if current:
+                widget.set(current)
+        except Exception:
+            pass
+    refresh_open_officer_comboboxes(app)
+    return officers
 
 
 def refresh_request_title_values(widget, title=""):
@@ -1550,6 +1662,77 @@ def require_device_identity(extraction_data, manufacturer_keys=None, model_keys=
     return ["Device manufacturer or model (not found in the extraction file)"]
 
 
+def no_extraction_completed(app):
+    var = getattr(app, "no_extraction_var", None)
+    if var is None:
+        return False
+    try:
+        return int(var.get()) == 1
+    except Exception:
+        return False
+
+
+def no_extraction_missing_fields(app):
+    """Only a template is required when No Extraction Completed is checked."""
+    if getattr(app, "template_file", None):
+        return []
+    return ["Template File"]
+
+
+def extraction_data_for_report(app):
+    if no_extraction_completed(app):
+        return {}
+    parse = getattr(app, "parse_extraction_file", None)
+    if not callable(parse):
+        return {}
+    if not getattr(app, "extraction_file", None):
+        return {}
+    try:
+        return parse() or {}
+    except Exception:
+        return {}
+
+
+def add_outcome_checkboxes(app, parent):
+    """No Evidence Found and No Extraction Completed, side by side."""
+    import tkinter as tk
+    from tkinter import ttk
+
+    row = ttk.Frame(parent)
+    row.pack(anchor="w", pady=(6, 0))
+    if getattr(app, "no_evidence_var", None) is None:
+        app.no_evidence_var = tk.IntVar(app)
+    app.no_evidence_checkbox = ttk.Checkbutton(
+        row,
+        text="No Evidence Found",
+        variable=app.no_evidence_var,
+        onvalue=1,
+        offvalue=0,
+    )
+    app.no_evidence_checkbox.pack(side=tk.LEFT, padx=(0, 16))
+    if getattr(app, "no_extraction_var", None) is None:
+        app.no_extraction_var = tk.IntVar(app)
+    app.no_extraction_checkbox = ttk.Checkbutton(
+        row,
+        text="No Extraction Completed",
+        variable=app.no_extraction_var,
+        onvalue=1,
+        offvalue=0,
+        command=lambda: _on_no_extraction_toggle(app),
+    )
+    app.no_extraction_checkbox.pack(side=tk.LEFT)
+    return row
+
+
+def _on_no_extraction_toggle(app):
+    refresh = getattr(app, "refresh_tab_status", None)
+    if callable(refresh):
+        try:
+            refresh()
+        except Exception:
+            pass
+
+
 PREVIEW_TOKEN_DATA_KEYS = {
     "PY_DFR": ("DFR_Num", "dfr_number"),
     "PY_CASENUMBER": ("Case_Number",),
@@ -2475,6 +2658,27 @@ def xml_replaceable_search_docs(doc, search_docs):
         return any(tag != name and tag.startswith(name) for tag in tagged)
 
     return {key: value for key, value in search_docs.items() if not overlaps_tag(key)}
+
+
+def reportable_missing_placeholders(doc, missing_names):
+    """Drop tokens the template never used. Storage reports should not warn about PC/HDD tags."""
+    names = [str(name).strip() for name in (missing_names or []) if str(name).strip()]
+    if not names:
+        return []
+    xml = ""
+    try:
+        element = getattr(doc, "_element", None)
+        xml = getattr(element, "xml", "") or ""
+        if not xml and element is not None:
+            from lxml import etree
+            xml = etree.tostring(element, encoding="unicode")
+    except Exception:
+        xml = ""
+    reportable = []
+    for name in names:
+        if name == "PY_TEXT" or (xml and name in xml):
+            reportable.append(name)
+    return reportable
 
 
 def apply_template_fields(doc, app, search_docs=None):

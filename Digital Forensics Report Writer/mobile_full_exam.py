@@ -18,7 +18,7 @@ from docx.oxml import parse_xml
 from lxml import etree
 from ui_theme import apply_theme, add_header_bar, add_action_bar, pack_right_actions, size_window, build_extracted_info_pane, parse_mdy_date, add_date_entry, COLORS, FormTabs, close_and_return, DndToplevel
 from app_menu import attach_app_menu
-from drafts_manager import add_notes_tab, delete_draft_for_app
+from drafts_manager import add_device_checklist_tab, add_notes_tab, delete_draft_for_app
 from paragraphs_manager import fill_paragraph, load_paragraphs
 from cellebrite_pdf import process_pdf_selection, parse_cellebrite_pdfs_only
 from report_common import (
@@ -33,6 +33,10 @@ from report_common import (
     seed_save_location,
     apply_template_fields,
     xml_replaceable_search_docs,
+    add_outcome_checkboxes,
+    no_extraction_completed,
+    no_extraction_missing_fields,
+    extraction_data_for_report,
     show_placeholder_preview,
     set_extracted_preview,
     apply_overrides_to_preview_rows,
@@ -49,6 +53,8 @@ from report_common import (
     remember_titles_from_form,
     setup_agency_combobox,
     remember_agencies_from_form,
+    setup_officer_combobox,
+    remember_officers_from_form,
     title_agency_words,
     saved_examiner_agency,
     bind_prefix_typeahead,
@@ -100,23 +106,26 @@ class MobileFullExam(DndToplevel):
         self.main_frame = ttk.Frame(self)
         self.main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
+        self.form_tabs = FormTabs(self.main_frame)
+
         self.paned_window = ttk.PanedWindow(self.main_frame, orient=tk.HORIZONTAL)
         self.paned_window.pack(fill=tk.BOTH, expand=True)
 
         self.left_frame = ttk.Frame(self.paned_window)
         self.paned_window.add(self.left_frame, weight=3)
-
-        self.form_tabs = FormTabs(self.left_frame)
-        self.tab_request = self.form_tabs.add_tab("request", "Request Info")
-        self.tab_examiner = self.form_tabs.add_tab("examiner", "Examiner Info")
-        self.tab_device = self.form_tabs.add_tab("device", "Device Info")
-        self.tab_output = self.form_tabs.add_tab("output", "Output Info")
-        add_notes_tab(self, self.form_tabs, mobile_checklists=True)
-        self.scrollable_frame = self.tab_request
-        self.middle_frame = self.tab_device
+        self.form_tabs.attach_body(self.left_frame)
 
         self.right_frame = ttk.Frame(self.paned_window)
         self.paned_window.add(self.right_frame, weight=2)
+
+        self.tab_request = self.form_tabs.add_tab("request", "Request Info")
+        self.tab_examiner = self.form_tabs.add_tab("examiner", "Examiner Info")
+        self.tab_device = self.form_tabs.add_tab("device", "Device Info")
+        add_device_checklist_tab(self, self.form_tabs)
+        self.tab_output = self.form_tabs.add_tab("output", "Output Info")
+        add_notes_tab(self, self.form_tabs)
+        self.scrollable_frame = self.tab_request
+        self.middle_frame = self.tab_device
         
         # Create the widgets and info display
         self.create_widgets()
@@ -197,6 +206,8 @@ class MobileFullExam(DndToplevel):
             device_ok = device_ok and bool(self.get_selected_forensic_software())
         except Exception:
             pass
+        if no_extraction_completed(self):
+            device_ok = True
 
         output_ok = bool(self._field_filled(getattr(self, "save_location", None)))
         if output_ok:
@@ -205,9 +216,13 @@ class MobileFullExam(DndToplevel):
             except Exception:
                 output_ok = False
 
+        prep_ok = any(int(var.get()) for var in (getattr(self, "android_checklist_vars", None) or [])) or any(
+            int(var.get()) for var in (getattr(self, "ios_checklist_vars", None) or [])
+        )
         self.form_tabs.set_complete("request", request_ok)
         self.form_tabs.set_complete("examiner", examiner_ok)
         self.form_tabs.set_complete("device", device_ok)
+        self.form_tabs.set_complete("prep", prep_ok)
         self.form_tabs.set_complete("output", output_ok)
 
     def create_left_column_widgets(self):
@@ -274,8 +289,9 @@ class MobileFullExam(DndToplevel):
 
         # Request Officer
         ttk.Label(self.agency_assist_frame, text="Requesting Officer:").grid(row=3, column=0, sticky="w", pady=2)
-        self.request_officer = ttk.Entry(self.agency_assist_frame)
+        self.request_officer = ttk.Combobox(self.agency_assist_frame)
         self.request_officer.grid(row=3, column=1, sticky="ew", pady=2)
+        setup_officer_combobox(self.request_officer)
 
         # Offense Type
         ttk.Label(self.agency_assist_frame, text="Primary Case Offense:").grid(row=4, column=0, sticky="w", pady=2)
@@ -676,7 +692,7 @@ class MobileFullExam(DndToplevel):
                 "examiner_agency_custom": "",
                 "examiner_title": examiner_title_value,
                 "examiner_name": self.examiner_name.get(),
-                "version": "1.0.6-beta.1"
+                "version": "1.1.0"
             }
             
             self.settings_manager.save_settings(settings_to_save)
@@ -1258,29 +1274,8 @@ class MobileFullExam(DndToplevel):
 
     def extract_header_info(self, pdf_text):
         """Pull GrayKey/Graykey OS version from old and new Progress Report layouts."""
-        header_info = {}
-        if not pdf_text:
-            return header_info
-
-        version_patterns = [
-            # New format (2026): "Graykey Software: OS Version: 1.29.0.35291825, App Bundle: ..."
-            r'Gray\s*[Kk]ey\s+Software:\s*OS Version:\s*([0-9]+(?:\.[0-9]+)*)',
-            # Older format: "GrayKey Software:" then OS Version on the same or following line
-            r'Gray\s*[Kk]ey\s+Software:.*?OS Version:\s*([0-9]+(?:\.[0-9]+)*)',
-            r'Gray\s*[Kk]ey\s+Software Version[:\s]+([0-9]+(?:\.[0-9]+)*)',
-            r'Gray\s*[Kk]ey\s+OS Version[:\s]+([0-9]+(?:\.[0-9]+)*)',
-            # Event-log fallback on both layouts
-            r'On-device agent started[\s\S]{0,240}?OS Version:\s*([0-9]+(?:\.[0-9]+)*)',
-        ]
-
-        flags = re.IGNORECASE | re.DOTALL
-        for pattern in version_patterns:
-            software_match = re.search(pattern, pdf_text, flags)
-            if software_match:
-                header_info['GrayKey_OS'] = software_match.group(1).strip()
-                break
-
-        return header_info
+        from cellebrite_pdf import parse_graykey_versions
+        return parse_graykey_versions(pdf_text)
 
     def extract_device_table_info(self, pdf_text):
         device_info = {}
@@ -1520,15 +1515,7 @@ class MobileFullExam(DndToplevel):
             self.right_frame,
             "Add a UFD or PDF file to see the extracted information.",
         )
-        self.no_evidence_var = tk.IntVar(self)
-        self.no_evidence_checkbox = ttk.Checkbutton(
-            self.info_frame,
-            text="No Evidence Found",
-            variable=self.no_evidence_var,
-            onvalue=1,
-            offvalue=0,
-        )
-        self.no_evidence_checkbox.pack(anchor="w", pady=(6, 0))
+        add_outcome_checkboxes(self, self.info_frame)
 
     def update_info_display(self, message=None, data=None):
         self.info_display.config(state=tk.NORMAL)
@@ -1667,6 +1654,9 @@ class MobileFullExam(DndToplevel):
         )
 
     def validate_fields(self):
+        if no_extraction_completed(self):
+            return no_extraction_missing_fields(self)
+
         missing_fields = []
 
         examiner_agency = (self.examiner_agency_type.get() or "").strip()
@@ -2077,14 +2067,12 @@ class MobileFullExam(DndToplevel):
                     if hasattr(self, 'case_time_frame_end_date') and self.case_time_frame_end_date.get().strip():
                         data['PY_LIMITEND'] = self.format_time_frame_date(self.case_time_frame_end_date.get())
 
-            try:
-                extraction_data = self.parse_extraction_file()
-            except Exception:
-                extraction_data = {}
-            identity_missing = require_device_identity(extraction_data)
-            if identity_missing and not preview_only:
-                messagebox.showerror("Missing Fields", "\n".join(identity_missing))
-                return
+            extraction_data = extraction_data_for_report(self)
+            if not no_extraction_completed(self):
+                identity_missing = require_device_identity(extraction_data)
+                if identity_missing and not preview_only:
+                    messagebox.showerror("Missing Fields", "\n".join(identity_missing))
+                    return
             data = prefer_gui_over_parsed(data, extraction_data)
             data = apply_preview_overrides_to_data(self, data)
             if preview_only:
@@ -2308,7 +2296,7 @@ class MobileFullExam(DndToplevel):
             "PY_CARRIER": data.get('device_carrier', ''),
             "PY_OS": data.get('Device_OS', ''),
             "PY_CBVER": data.get('cellebrite_version', ''),
-            "PY_GKVER": data.get('GrayKey_OS', ''),
+            "PY_GKVER": data.get('GrayKey_OS') or data.get('GrayKey_App') or '',
             "PY_EXAMINE": data.get('axiom_version') or getattr(self, "axiom_version", "") or "",
             "PY_EXAMINEVER": data.get('axiom_version') or getattr(self, "axiom_version", "") or "",
         }
@@ -2392,6 +2380,9 @@ class MobileFullExam(DndToplevel):
         return (self.request_title_type.get() or "").strip()
 
     def validate_fields(self):
+        if no_extraction_completed(self):
+            return no_extraction_missing_fields(self)
+
         missing_fields = []
 
         examiner_agency = (self.examiner_agency_type.get() or "").strip()
@@ -2528,6 +2519,14 @@ class MobileFullExam(DndToplevel):
         # Add Paragraph Four
         self.add_bold_underline_paragraph(new_doc, self.paragraphs['four'])
 
+        if no_extraction_completed(self):
+            add_paragraph_with_style(new_doc, self.paragraphs.get("Paragraph_NoExtract", ""))
+            if getattr(self, "no_evidence_var", None) is not None and self.no_evidence_var.get() == 1:
+                self.add_bold_underline_paragraph(new_doc, self.paragraphs['nine'])
+                add_paragraph_with_style(new_doc, self.paragraphs['Paragraph_NoEv'])
+            prepare_block_document(new_doc, blank_between=False)
+            return
+
         # Add Paragraph Five - based on extraction type
         if self.extraction_type == "Cellebrite":
             if hasattr(self, 'multiple_extractions') and self.multiple_extractions:
@@ -2638,6 +2637,7 @@ class MobileFullExam(DndToplevel):
             doc.save(output_path)
             remember_titles_from_form(self)
             remember_agencies_from_form(self)
+            remember_officers_from_form(self)
             delete_draft_for_app(self)
             messagebox.showinfo("Success", f"Report generated and saved as:\n{output_path}")
             
@@ -2796,4 +2796,4 @@ class MobileFullExam(DndToplevel):
         close_and_return(self)
 
 
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.6-beta.1) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.1.0) © 2026 #

@@ -51,7 +51,7 @@ def _dnd_toplevel_class():
 DndToplevel = _dnd_toplevel_class()
 
 APP_NAME = "Digital Forensics Report Writer"
-APP_VERSION = "1.0.6-beta.1"
+APP_VERSION = "1.1.0"
 COPYRIGHT_YEAR = "2026"
 GITHUB_URL = "https://github.com/omegakyd"
 # Previous product name; used only to migrate AppData files from v1.0.0 and earlier.
@@ -681,17 +681,22 @@ def add_header_bar(parent, title, subtitle=None):
 
 
 class FormTabs:
-    """Persistent form tabs. Switching tabs hides pages; it does not clear fields."""
+    """Persistent form tabs. Switching tabs hides pages; it does not clear fields.
 
-    def __init__(self, parent):
+    The tab strip packs into ``parent``. Page bodies pack into ``body_parent``
+    when one is supplied (or later via ``attach_body``), so the strip can span
+    both columns while the fields stay in the left pane.
+    """
+
+    def __init__(self, parent, body_parent=None):
         import tkinter as tk
         from tkinter import ttk
 
         self.colors = COLORS
         self.header = tk.Frame(parent, bg=self.colors["bg"])
         self.header.pack(fill=tk.X, pady=(0, 6))
-        self.body = ttk.Frame(parent)
-        self.body.pack(fill=tk.BOTH, expand=True)
+        self.body_parent = body_parent
+        self.body = None
         self.pages = {}
         self.canvases = {}
         self.buttons = {}
@@ -699,12 +704,29 @@ class FormTabs:
         self.complete = {}
         self.visited = set()
         self.selected = None
+        if body_parent is not None:
+            self.attach_body(body_parent)
+
+    def attach_body(self, body_parent):
+        from tkinter import ttk
+
+        if self.body is not None:
+            return self.body
+        self.body_parent = body_parent
+        self.body = ttk.Frame(body_parent)
+        self.body.pack(fill="both", expand=True)
+        return self.body
+
+    def _ensure_body(self):
+        if self.body is None:
+            self.attach_body(self.body_parent or self.header.master)
+        return self.body
 
     def add_tab(self, key, title):
         import tkinter as tk
         from tkinter import ttk
 
-        page_wrap = ttk.Frame(self.body)
+        page_wrap = ttk.Frame(self._ensure_body())
         canvas = tk.Canvas(page_wrap, bg=self.colors["bg"], highlightthickness=0)
         scrollbar = ttk.Scrollbar(page_wrap, orient=tk.VERTICAL, command=canvas.yview)
         inner = ttk.Frame(canvas)

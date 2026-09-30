@@ -21,6 +21,49 @@ def extract_pdf_text(pdf_path):
     return "\n".join((page.extract_text() or "") for page in reader.pages)
 
 
+_GRAYKEY_VERSION = r"v?(\d+(?:\.\d+)+)"
+
+
+def parse_graykey_versions(text):
+    """Pull GrayKey appliance OS and app/agent versions from a Progress Report.
+
+    New reports look like:
+        Graykey Software: OS Version: 1.29.0.35291825, App Bundle: 8.5.0.35891913
+    Older reports put OS Version on the next line or only in the event log.
+    """
+    result = {}
+    body = text or ""
+    if not body:
+        return result
+    flags = re.IGNORECASE | re.DOTALL
+    os_patterns = (
+        r"Gray\s*[Kk]ey\s+Software\s*:?\s*OS\s*Version\s*:?\s*" + _GRAYKEY_VERSION,
+        r"Gray\s*[Kk]ey\s+Software[\s\S]{0,120}?OS\s*Version\s*:?\s*" + _GRAYKEY_VERSION,
+        r"Gray\s*[Kk]ey\s+OS\s*Version\s*:?\s*" + _GRAYKEY_VERSION,
+        r"Gray\s*[Kk]ey\s+Software\s*Version\s*:?\s*" + _GRAYKEY_VERSION,
+        r"On-device agent started[\s\S]{0,300}?OS\s*Version\s*:?\s*" + _GRAYKEY_VERSION,
+        r"OS\s*Version\s*:?\s*" + _GRAYKEY_VERSION + r"(?=[^\n]{0,60}App\s*Bundle)",
+    )
+    app_patterns = (
+        r"App\s*Bundle\s*:?\s*" + _GRAYKEY_VERSION,
+        r"Gray\s*[Kk]ey\s+Agent\s+Version\s*:?\s*" + _GRAYKEY_VERSION,
+        r"AL\s*Version\s*:?\s*" + _GRAYKEY_VERSION,
+    )
+    for pattern in os_patterns:
+        match = re.search(pattern, body, flags)
+        if match:
+            result["GrayKey_OS"] = match.group(1).strip()
+            break
+    for pattern in app_patterns:
+        match = re.search(pattern, body, flags)
+        if match:
+            result["GrayKey_App"] = match.group(1).strip()
+            break
+    if not result.get("GrayKey_OS") and result.get("GrayKey_App"):
+        result["GrayKey_OS"] = result["GrayKey_App"]
+    return result
+
+
 def classify_mobile_pdf(text, filename=""):
     name = (filename or "").lower()
     body = text or ""

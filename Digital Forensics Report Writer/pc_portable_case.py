@@ -41,8 +41,16 @@ from report_common import (
     remember_titles_from_form,
     setup_agency_combobox,
     remember_agencies_from_form,
+    setup_officer_combobox,
+    remember_officers_from_form,
+    prefer_gui_over_parsed,
     apply_template_fields,
     xml_replaceable_search_docs,
+    reportable_missing_placeholders,
+    add_outcome_checkboxes,
+    no_extraction_completed,
+    no_extraction_missing_fields,
+    extraction_data_for_report,
     title_agency_words,
     saved_examiner_agency,
     bind_prefix_typeahead,
@@ -98,13 +106,18 @@ class PCPortableCase(DndToplevel):
         self.main_frame = ttk.Frame(self)
         self.main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
+        self.form_tabs = FormTabs(self.main_frame)
+
         self.paned_window = ttk.PanedWindow(self.main_frame, orient=tk.HORIZONTAL)
         self.paned_window.pack(fill=tk.BOTH, expand=True)
         
         self.left_frame = ttk.Frame(self.paned_window)
         self.paned_window.add(self.left_frame, weight=3)
+        self.form_tabs.attach_body(self.left_frame)
 
-        self.form_tabs = FormTabs(self.left_frame)
+        self.right_frame = ttk.Frame(self.paned_window)
+        self.paned_window.add(self.right_frame, weight=2)
+
         self.tab_request = self.form_tabs.add_tab("request", "Request Info")
         self.tab_examiner = self.form_tabs.add_tab("examiner", "Examiner Info")
         self.tab_device = self.form_tabs.add_tab("device", "Device Info")
@@ -112,9 +125,6 @@ class PCPortableCase(DndToplevel):
         add_notes_tab(self, self.form_tabs)
         self.scrollable_frame = self.tab_request
         self.middle_frame = self.tab_device
-
-        self.right_frame = ttk.Frame(self.paned_window)
-        self.paned_window.add(self.right_frame, weight=2)
         
         self.create_widgets()
         self.create_info_display()
@@ -149,7 +159,8 @@ class PCPortableCase(DndToplevel):
     def bind_tab_status_events(self):
         for name in (
             "request_date", "request_agency", "request_officer", "case_type",
-            "examiner_name", "dfr_number", "device_owner", "save_location",
+            "examiner_name", "dfr_number", "device_owner", "device_type",
+            "device_type_entry", "device_PCMan", "save_location",
         ):
             widget = getattr(self, name, None)
             if widget is None:
@@ -167,11 +178,26 @@ class PCPortableCase(DndToplevel):
             "request_date", "request_agency", "request_officer", "case_type"
         ))
         examiner_ok = self._field_filled(getattr(self, "examiner_name", None)) and is_complete_dfr_number(self.dfr_number.get() if hasattr(self, "dfr_number") else "")
-        device_ok = self._field_filled(getattr(self, "device_owner", None))
+        device_type = ""
+        try:
+            device_type = (self.device_type.get() or "").strip() if hasattr(self, "device_type") else ""
+        except Exception:
+            device_type = ""
+        if device_type == "Other Storage Device":
+            device_type_ok = self._field_filled(getattr(self, "device_type_entry", None))
+        else:
+            device_type_ok = bool(device_type)
+        device_ok = (
+            self._field_filled(getattr(self, "device_owner", None))
+            and device_type_ok
+            and self._field_filled(getattr(self, "device_PCMan", None))
+        )
         try:
             device_ok = device_ok and bool(self.get_selected_forensic_software())
         except Exception:
             pass
+        if no_extraction_completed(self):
+            device_ok = True
         output_ok = self._field_filled(getattr(self, "save_location", None))
         if output_ok:
             try:
@@ -225,8 +251,9 @@ class PCPortableCase(DndToplevel):
 
         # Request Officer
         ttk.Label(parent_frame, text="Requesting Officer:").grid(row=3, column=0, sticky="w", pady=2)
-        self.request_officer = ttk.Entry(parent_frame)
+        self.request_officer = ttk.Combobox(parent_frame)
         self.request_officer.grid(row=3, column=1, sticky="ew", pady=2)
+        setup_officer_combobox(self.request_officer)
 
         # Offense Type
         ttk.Label(parent_frame, text="Primary Case Offense:").grid(row=4, column=0, sticky="w", pady=2)
@@ -479,7 +506,7 @@ class PCPortableCase(DndToplevel):
                 "examiner_agency_custom": "",
                 "examiner_title": examiner_title_value,
                 "examiner_name": self.examiner_name.get(),
-                "version": "1.0.6-beta.1"
+                "version": "1.1.0"
             }
             
             self.settings_manager.save_settings(settings_to_save)
@@ -532,7 +559,8 @@ class PCPortableCase(DndToplevel):
             text="Axiom",
             variable=self.axiom_var,
             onvalue=1,
-            offvalue=0
+            offvalue=0,
+            command=self.on_forensic_software_change
         )
         self.axiom_checkbox.grid(row=0, column=0, sticky="w", padx=(0, 10))
         
@@ -541,7 +569,8 @@ class PCPortableCase(DndToplevel):
             text="X-Ways",
             variable=self.xways_var,
             onvalue=1,
-            offvalue=0
+            offvalue=0,
+            command=self.on_forensic_software_change
         )
         self.xways_checkbox.grid(row=0, column=1, sticky="w", padx=(0, 10))
         
@@ -560,6 +589,7 @@ class PCPortableCase(DndToplevel):
             self.forensic_software = type('obj', (object,), {'get': lambda: ', '.join(selected_software)})()
         else:
             self.forensic_software = type('obj', (object,), {'get': lambda: ''})()
+        self.refresh_tab_status()
 
     def create_device_info_frame(self):
         device_frame = ttk.LabelFrame(self.tab_device, text="Device Information", padding="10")
@@ -769,15 +799,7 @@ class PCPortableCase(DndToplevel):
             self.right_frame,
             "Add a log file (.txt) to see the extracted information.",
         )
-        self.no_evidence_var = tk.IntVar(self)
-        self.no_evidence_checkbox = ttk.Checkbutton(
-            self.info_frame,
-            text="No Evidence Found",
-            variable=self.no_evidence_var,
-            onvalue=1,
-            offvalue=0,
-        )
-        self.no_evidence_checkbox.pack(anchor="w", pady=(6, 0))
+        add_outcome_checkboxes(self, self.info_frame)
 
     def update_info_display(self, message=None, data=None):
         self.info_display.config(state=tk.NORMAL)
@@ -1510,6 +1532,9 @@ class PCPortableCase(DndToplevel):
         self.paragraphs = load_paragraphs("pc_portable")
 
     def validate_fields(self):
+        if no_extraction_completed(self):
+            return no_extraction_missing_fields(self)
+
         missing_fields = []
 
         examiner_agency = (self.examiner_agency_type.get() or "").strip()
@@ -1886,10 +1911,7 @@ class PCPortableCase(DndToplevel):
                     'Transfer_Agency_Abbr': transfer_agency_abbr,
                 })
 
-            try:
-                extraction_data = self.parse_extraction_file()
-            except Exception:
-                extraction_data = {}
+            extraction_data = extraction_data_for_report(self)
             
             extraction_fields_to_copy = [
                 'case_id',
@@ -2023,7 +2045,10 @@ class PCPortableCase(DndToplevel):
                         if was_replaced:
                             replaced_strings[search_string] = True
                 
-                final_missing = [s for s, replaced in replaced_strings.items() if not replaced]
+                final_missing = reportable_missing_placeholders(
+                    doc,
+                    [s for s, replaced in replaced_strings.items() if not replaced],
+                )
                 
                 if final_missing:
                     if "PY_TEXT" in final_missing:
@@ -2140,7 +2165,7 @@ class PCPortableCase(DndToplevel):
                 print(f"Error reading log file for PY_ACQUIRE: {e}")
                 log_content = ""
         
-        extraction_data = self.parse_extraction_file() if hasattr(self, 'parse_extraction_file') else {}
+        extraction_data = extraction_data_for_report(self)
         
         image_date = format_date_for_image(extraction_data)
         
@@ -2200,7 +2225,7 @@ class PCPortableCase(DndToplevel):
         print("\nGenerating replacement content:")
         
         for search_string, doc in search_docs.items():
-            if search_string in ("PY_TEXT", "PY_NOTES", "PY_ACQUIRE"):
+            if search_string in ("PY_TEXT", "PY_NOTES"):
                 para_count = len(doc.paragraphs) if doc.paragraphs else 0
                 print(f"  {search_string}: {para_count} paragraphs already generated")
                 continue 
@@ -2208,6 +2233,7 @@ class PCPortableCase(DndToplevel):
             if search_string == "PY_ACQUIRE":
                 print(f"  {search_string}: preserving log file formatting ({len(log_content)} characters)")
                 add_formatted_log_to_doc(doc, log_content)
+                prepare_block_document(doc, blank_between=False)
                 continue
             
             value = replacement_map.get(search_string, '')
@@ -2337,6 +2363,11 @@ class PCPortableCase(DndToplevel):
         # Paragraph 4 - Header
         self.add_bold_underline_paragraph(new_doc, self.paragraphs['four'])
 
+        if no_extraction_completed(self):
+            add_paragraph_with_style(new_doc, self.paragraphs.get("Paragraph_NoExtract", ""))
+            prepare_block_document(new_doc, blank_between=False)
+            return
+
         # Paragraph 5 - Extraction method
         if hasattr(self, 'extraction_type'):
             if self.extraction_type == "TX1":
@@ -2362,7 +2393,6 @@ class PCPortableCase(DndToplevel):
 
         # Paragraph 10
         add_paragraph_with_style(new_doc, self.paragraphs['ten'])
-        prepare_block_document(new_doc, blank_between=False)
     
     def save_document(self, doc):
         output_filename = self.output_filename.get().strip()
@@ -2388,6 +2418,7 @@ class PCPortableCase(DndToplevel):
             doc.save(output_path)
             remember_titles_from_form(self)
             remember_agencies_from_form(self)
+            remember_officers_from_form(self)
             delete_draft_for_app(self)
             messagebox.showinfo("Success", f"Report generated and saved as:\n{output_path}")
             
@@ -2537,4 +2568,4 @@ class PCPortableCase(DndToplevel):
         close_and_return(self)
 
 
-# Ω Digital Forensics Report Writer Ω (ver. 1.0.6-beta.1) © 2026 #
+# Ω Digital Forensics Report Writer Ω (ver. 1.1.0) © 2026 #

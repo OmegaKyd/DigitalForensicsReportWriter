@@ -77,6 +77,7 @@ PARAGRAPH_META = {
         "sixteen": ("AXIOM — Artifacts intro", "Used unless No Evidence Found is checked."),
         "seventeen": ("Heading — Artifacts", "Section heading (bold / underline)."),
         "Paragraph_NoEv": ("No evidence found", "Used when No Evidence Found is checked."),
+        "Paragraph_NoExtract": ("No extraction completed", "Used when No Extraction Completed is checked."),
     },
     "mobile_portable": {
         "one_a": ("Opening — no transfer", "Device was not transferred."),
@@ -99,6 +100,7 @@ PARAGRAPH_META = {
         "eight": ("Portable case delivered", "Always included."),
         "nine": ("No further examination", "Always included."),
         "ten": ("Evidence storage", "Always included."),
+        "Paragraph_NoExtract": ("No extraction completed", "Used when No Extraction Completed is checked."),
     },
     "pc_full": {
         "one_a_computer": ("Opening — Case Agent, computer", "Case Agent and device type is Computer."),
@@ -135,6 +137,7 @@ PARAGRAPH_META = {
         "sixteen": ("AXIOM — Artifacts intro", "Used unless No Evidence Found is checked."),
         "seventeen": ("Heading — Artifacts", "Section heading (bold / underline)."),
         "Paragraph_NoEv": ("No evidence found", "Used when No Evidence Found is checked."),
+        "Paragraph_NoExtract": ("No extraction completed", "Used when No Extraction Completed is checked."),
     },
     "pc_portable": {
         "one_b_computer": ("Opening — computer, no transfer", "Computer and the device was not transferred."),
@@ -158,6 +161,7 @@ PARAGRAPH_META = {
         "eight": ("Processing software", "Always included."),
         "nine": ("Portable case delivered", "Always included."),
         "ten": ("No further examination", "Always included."),
+        "Paragraph_NoExtract": ("No extraction completed", "Used when No Extraction Completed is checked."),
     },
     "warrant": {
         "intro_self": (
