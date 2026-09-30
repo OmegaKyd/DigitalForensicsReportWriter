@@ -1,6 +1,6 @@
 # Digital Forensics Report Writer
 
-**Version 1.0.6-beta.1** (changes since v1.0.5-beta.1)
+**Version 1.1.0** (changes since v1.0.6-beta.1; cumulative since v1.0.5)
 
 Desktop application for writing digital forensic reports from mobile extractions, computer acquisitions, and search-warrant data returns. The examiner fills case fields (or imports them from vendor reports), chooses a Word template, previews the `PY_` placeholders, and writes a completed `.docx` report.
 
@@ -23,17 +23,21 @@ Official base templates ship in the project `Templates/` folder as `DFR Mobile.d
 ## Features
 
 - Optional Notes tab; notes print at `PY_NOTES`
-- Mobile Notes tab Android / Apple iOS prep checklists check tagged boxes on the official base template (`PY_ANDROID_*`, `PY_IOS_*`)
+- Mobile Device Prep tab Android / Apple iOS prep checklists check tagged boxes on the official base template (`PY_ANDROID_*`, `PY_IOS_*`)
+- **No Extraction Completed** next to No Evidence Found; skips required fields except the template and writes only completed values
 - File → Save Progress / Open Unfinished Reports to pause and resume a form; File → Manage Unfinished Reports… deletes drafts without generating; generating a report also deletes that draft
 - Tools → Report Number Prefix… sets the default value filled into the Report Number field
 - Shared dark forensic theme and Omega header across the start screen and report windows
 - Examiner name, title, and agency remembered between sessions
 - Shared, editable officer-title list for requesting officer, examiner, and transfer officer (**Tools → Edit Officer Titles…**)
+- Requesting Officer is a remembered combobox with the same typeahead as Agency and Title (**Tools → Edit Requesting Officers…**)
+- Warrant Data Returns Service Provider field remembers previous names and typeahead-completes them (**Tools → Edit Service Providers…**)
 - Editable canned narrative for every report type (**Tools → Edit Paragraphs…**); factory wording stays in the program, user overrides are stored separately
 - Calendar date pickers on report date fields
 - Case Agent can fill requesting-officer fields from the examiner so `PY_REQOFF` / `PY_REQAGENCY` still flow through the existing placeholder path
 - Drag-and-drop and file pickers for extraction logs and PDFs
 - Cellebrite Summary Report / Quick View parsing (`cellebrite_pdf.py`)
+- GrayKey Progress Report software version fills `PY_GKVER` on DFR Mobile
 - Computer modules also accept Cellebrite Digital Collector acquisition logs (`PY_DCVER`)
 - First-listed identifier rule for IMEI, ICCID, and carrier lists
 - GUI values win over parsed values when both exist
@@ -50,18 +54,21 @@ Official base templates ship in the project `Templates/` folder as `DFR Mobile.d
 - Artifact list is limited by device class (mobile vs computer/storage vs warrant/cloud); Cloud and Refined Results appear on mobile and computer classes
 - Help → About includes a clickable GitHub link
 - Help menu listing every supported `PY_` token
+- Uncaught errors write a crash log; **Help → Open Crash Logs…** opens the folder so the file can be sent for troubleshooting
 
-## What's new in v1.0.6-beta.1
+## What's new in v1.1.0
 
-Compared with v1.0.5:
+Compared with v1.0.6-beta.1:
 
-- Working templates can use Word content-control **Tags** in addition to typed `PY_` tokens
-- Notes print at `PY_NOTES` instead of `PY_TEXT` / `PY_CHECKLIST`
-- Authority, time-frame, acquisition-log, and processing checkboxes follow tagged controls
-- Mobile Android / Apple iOS prep checklists map to `PY_ANDROID_*` and `PY_IOS_*` (includes Stolen Device Protection)
-- FTK Imager 8.3.0.27 logs parse the same fields as 4.7
-- Axiom version fills `PY_EXAMINEVER` (and `PY_EXAMINE` on older templates)
-- Help → Template Placeholders lists the current tag index
+- Requesting Officer is a remembered typeahead field (**Tools → Edit Requesting Officers…**)
+- Form tabs span the full window; mobile Device Prep sits between Device Info and Output
+- Crash log with **Help → Open Crash Logs…**
+- **No Extraction Completed** generates a report from whatever is already filled
+- GrayKey Progress Report OS version fills `PY_GKVER`
+- Storage templates no longer warn about computer-only tags
+- Computer Portable Device Info completion and `PY_ACQUIRE` fill
+
+Tagged templates, `PY_NOTES`, authority/processing checkboxes, FTK 8.3 parsing, and `PY_EXAMINEVER` from v1.0.6-beta.1 remain.
 
 Full detail is in the project-root `RELEASE_NOTES.md`.
 
@@ -121,6 +128,8 @@ The project `Templates/` directory remains the official source copy.
 
 - **Tools → Edit Paragraphs…** edits the canned report wording. Tokens such as `{Request_Date}` are filled from the form. `PY_` tokens belong in Word templates, not in these paragraphs.
 - **Tools → Edit Officer Titles…** edits the shared title list. Typing a title that is not listed and then saving a report adds it. Drag rows or use Move Up / Move Down to reorder. Revert restores the factory list.
+- **Tools → Edit Requesting Officers…** edits the remembered officer-name list. Typing a name that is not listed and then generating a report adds it. The list stays alphabetical.
+- **Tools → Edit Service Providers…** edits the Warrant Data Returns provider list. New names are added when a report is generated. The list stays alphabetical.
 
 ## Build a Windows exe
 
@@ -143,6 +152,7 @@ py -3 build_exe.py
 ```
 Digital Forensics Report Writer/
 ├── start_screen.py            # launcher
+├── crash_log.py               # uncaught-exception log
 ├── app_menu.py                # File / Tools / Help
 ├── drafts_manager.py          # notes, checklists, unfinished reports
 ├── ui_theme.py                # theme, APP_NAME, APP_VERSION, header bar
@@ -153,6 +163,8 @@ Digital Forensics Report Writer/
 ├── paragraphs_editor.py       # Tools → Edit Paragraphs
 ├── titles_editor.py           # Tools → Edit Officer Titles
 ├── agencies_editor.py         # Tools → Edit Agencies
+├── officers_editor.py         # Tools → Edit Requesting Officers
+├── providers_editor.py        # Tools → Edit Service Providers
 ├── magnet_artifacts.py        # Magnet Axiom artifact picker
 ├── magnet_artifacts.json      # bundled artifact catalog
 ├── axiom_html_report.py       # AXIOM HTML/XML tagged-export parser
