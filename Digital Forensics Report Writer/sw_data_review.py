@@ -781,7 +781,7 @@ class WarrantDataReturns(DndToplevel):
         else:
             add(self.paragraphs["three_b"])
 
-        prepare_block_document(new_doc, blank_between=False)
+        prepare_block_document(new_doc, blank_between=True)
         if hasattr(self, "cb_axiom_var") and self.cb_axiom_var.get() == 1:
             header = new_doc.add_paragraph()
             run = header.add_run("ARTIFACTS:")
@@ -807,7 +807,7 @@ class WarrantDataReturns(DndToplevel):
                 run.font.name = "Arial"
                 run.font.size = Pt(11)
                 run.font.italic = True
-        prepare_block_document(new_doc, blank_between=False)
+        prepare_block_document(new_doc, blank_between=True)
 
 ###PARAGRAPHS###
 

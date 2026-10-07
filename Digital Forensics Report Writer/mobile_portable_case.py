@@ -2031,7 +2031,7 @@ class MobilePortableCase(DndToplevel):
 
         if no_extraction_completed(self):
             add_paragraph_with_style(new_doc, self.paragraphs.get("Paragraph_NoExtract", ""), add_blank_after=False)
-            prepare_block_document(new_doc, blank_between=False)
+            prepare_block_document(new_doc, blank_between=True)
             return
 
         # Add Paragraph Six - based on extraction type with blank line after
@@ -2063,7 +2063,7 @@ class MobilePortableCase(DndToplevel):
         
         # Add Paragraph Ten (last paragraph - no blank line after)
         add_paragraph_with_style(new_doc, self.paragraphs['ten'], add_blank_after=False)
-        prepare_block_document(new_doc, blank_between=False)
+        prepare_block_document(new_doc, blank_between=True)
     
     def save_document(self, doc):
         output_filename = self.output_filename.get().strip()

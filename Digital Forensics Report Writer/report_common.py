@@ -2619,7 +2619,9 @@ def fill_tagged_text_controls(doc, search_docs):
         replacement = lookup[name.casefold()]
         _remove_showing_placeholder(sdt)
         if name.upper() in BLOCK_CONTENT_TAGS and hasattr(replacement, "paragraphs"):
-            if _fill_block_sdt(sdt, replacement, blank_between=False):
+            # Narrative needs a blank line between paragraphs. Notes, acquisition
+            # logs, and checklists keep the line breaks the examiner already typed.
+            if _fill_block_sdt(sdt, replacement, blank_between=(name.upper() == "PY_TEXT")):
                 changed += 1
             continue
         text = _plain_from_doc(replacement) if hasattr(replacement, "paragraphs") else str(replacement or "")

@@ -2524,7 +2524,7 @@ class MobileFullExam(DndToplevel):
             if getattr(self, "no_evidence_var", None) is not None and self.no_evidence_var.get() == 1:
                 self.add_bold_underline_paragraph(new_doc, self.paragraphs['nine'])
                 add_paragraph_with_style(new_doc, self.paragraphs['Paragraph_NoEv'])
-            prepare_block_document(new_doc, blank_between=False)
+            prepare_block_document(new_doc, blank_between=True)
             return
 
         # Add Paragraph Five - based on extraction type
@@ -2564,7 +2564,7 @@ class MobileFullExam(DndToplevel):
             
             # Add No Evidence paragraph instead of paragraphs 10 and on
             add_paragraph_with_style(new_doc, self.paragraphs['Paragraph_NoEv'])
-            prepare_block_document(new_doc, blank_between=False)
+            prepare_block_document(new_doc, blank_between=True)
         else:
             # Normal flow - Add Paragraph Nine - Findings of Exam Header
             self.add_bold_underline_paragraph(new_doc, self.paragraphs['nine'])
@@ -2592,7 +2592,7 @@ class MobileFullExam(DndToplevel):
 
             # Add Paragraph Seventeen - Artifacts Header
             self.add_bold_underline_paragraph(new_doc, self.paragraphs['seventeen'])
-            prepare_block_document(new_doc, blank_between=False)
+            prepare_block_document(new_doc, blank_between=True)
 
             # BEGIN ARTIFACTS
             if hasattr(self, 'selected_artifacts') and self.selected_artifacts:
@@ -2606,7 +2606,7 @@ class MobileFullExam(DndToplevel):
                 run.font.name = 'Arial'
                 run.font.size = Pt(11)
                 run.font.italic = True
-        prepare_block_document(new_doc, blank_between=False)
+        prepare_block_document(new_doc, blank_between=True)
 
     def save_document(self, doc):
         output_filename = self.output_filename.get().strip()

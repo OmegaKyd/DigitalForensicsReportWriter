@@ -2365,7 +2365,7 @@ class PCPortableCase(DndToplevel):
 
         if no_extraction_completed(self):
             add_paragraph_with_style(new_doc, self.paragraphs.get("Paragraph_NoExtract", ""))
-            prepare_block_document(new_doc, blank_between=False)
+            prepare_block_document(new_doc, blank_between=True)
             return
 
         # Paragraph 5 - Extraction method
