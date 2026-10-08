@@ -1,0 +1,5 @@
+PyPDF2
+lxml
+python-docx
+tkinterdnd2
+Pillow
